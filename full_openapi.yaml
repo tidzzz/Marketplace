@@ -1,0 +1,1351 @@
+# ======================================================================
+# openapi.yaml — IMT Second-Hand Marketplace (Tier A / MINIMUM)
+# ======================================================================
+# PURPOSE
+# ------
+# This is the **teacher-provided OpenAPI 3.1 specification** for the
+# *minimum* feature set (Tier A) that every student team MUST implement
+# exactly. Passing the automated tests against this spec yields a
+# passing grade; “extras” (Tier B) are separate and are NOT specified
+# here.
+#
+# SCOPE
+# -----
+# - **Only** HTTP methods used: GET, POST, PUT, DELETE.
+# - All currency values are **integers in euro cents** (e.g., €12.34 → 1234).
+# - Server-side totals must use the Buyer-Protection configuration.
+# - Authentication for automated tests is simulated via HTTP header
+#   `X-User-Email` (see `components.securitySchemes.testUserHeader`).
+#   The special admin user is **admin@imt.test** (pre-seeded).
+# - All date-time values are RFC 3339 strings in UTC (e.g. `2025-10-07T12:34:56Z`).
+#
+# TERMINOLOGY
+# -----------
+# - “Buyer-Protection” (“insurance”) fee = percentage of item price
+#   (shipping excluded) **rounded to nearest cent with halves upwards**,
+#   plus a fixed bias (flat fee) in cents. See the normative formula
+#   under `components.schemas.BuyerProtectionConfig` and in the
+#   `/api/browse/listings` description and examples.
+#
+#
+# IMPLEMENTATION NOTES (NORMATIVE FOR TESTS)
+# ------------------------------------------
+# - **Identity/Access (for tests):** Endpoints that require a user context
+#   MUST read the `X-User-Email` header. If required but missing, return
+#   401 with an error object. If present but action is not permitted
+#   (e.g., not the owner or not admin), return 403.
+# - **Admin:** Any request with `X-User-Email: admin@imt.test` is treated
+#   as the single admin user. Admin-only endpoints MUST enforce this.
+# - **User Deletion:** Admin DELETE of a user *logically* deletes the user
+#   and **immediately hides** all their active listings from browse/search
+#   by switching their status to `deleted`. For API consumers, deleted
+#   users MUST NOT be returned by any endpoint. Purchases that already
+#   exist remain readable for the counterpart (buyer/seller) and admin.
+# - **Listing Deletion:** DELETE marks listing as `deleted`. It MUST then
+#   (a) no longer appear in browse/search, and (b) `GET /api/listings/{id}`
+#   MUST return 404 for non-admin callers. (Admin access to deleted content
+#   is not required by tests.)
+# - **Photos:** When creating/updating listings, the `photos` array MUST
+#   contain at least one element. At most **one** photo may have
+#   `is_thumbnail: true`. If **none** is set true, the server MUST
+#   automatically set the first photo as the thumbnail in the stored
+#   representation and responses.
+# - **Purchase Flow (simplified):**
+#   1) `POST /api/purchases` debits buyer credits by `total_cents`,
+#      marks listing `sold`, stores a **snapshot** (at purchase time) of
+#      prices, shipping, insurance part, totals, and shipping address.
+#   2) A corresponding **credit transaction** is recorded for the buyer
+#      (type `purchase`, negative amount) and for the seller (type
+#      `sale_payout`, positive amount equal to `item_price_cents +
+#      shipping_cents`). The insurance part is kept by the system.
+#   3) Buyer may call `/declare` exactly once. If `OK` → status `closed`
+#      (no money movement). If `NOT_RECEIVED` or `NOT_AS_DESCRIBED` →
+#      refund exactly `item_price_cents + shipping_cents` to the **buyer’s**
+#      credits (type `refund`), leaving seller payout unchanged; status
+#      `refunded`. Subsequent calls MUST return 409.
+# - **Search Semantics:** Full-text search `q` MUST match case-insensitively
+#   in TITLE OR DESCRIPTION. Category filter MUST include descendants
+#   (infinite nesting).
+#
+openapi: 3.1.0
+info:
+  title: IMT Second-Hand Marketplace — Tier A (Minimum)
+  version: 1.0.0
+  description: |
+    Teacher-provided API for automated testing. All strings and test
+    descriptions are in English. Students MUST implement this spec as-is.
+    Any deviation may cause tests to fail.
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+
+tags:
+  - name: categories
+    description: Category management with infinite nesting (admin CRUD; public read).
+  - name: config
+    description: Global Buyer-Protection (insurance) configuration.
+  - name: users
+    description: User registration and admin deletion.
+  - name: addresses
+    description: Manage the authenticated user’s delivery addresses.
+  - name: listings
+    description: Seller listing CRUD and listing details (publicly readable if active).
+  - name: browse
+    description: Public browse/search endpoint with server-computed totals.
+  - name: credits
+    description: Magic top-up and ledger for the authenticated user.
+  - name: purchases
+    description: Create and retrieve purchases; buyer declares outcome.
+  - name: photos
+    description: Uploading and serving user photos. Upload requires auth; serving is public.
+
+
+components:
+  securitySchemes:
+    testUserHeader:
+      type: apiKey
+      in: header
+      name: X-User-Email
+      description: |
+        For automated tests only. If an endpoint requires authentication,
+        the client MUST send this header with a valid user email. To act
+        as admin, use the exact value `admin@imt.test`.
+
+  parameters:
+    CategoryId:
+      name: category_id
+      in: path
+      required: true
+      description: Numeric identifier of a category (>= 1).
+      schema: { type: integer, minimum: 1 }
+    AddressId:
+      name: address_id
+      in: path
+      required: true
+      description: Numeric identifier of a user-owned address (>= 1).
+      schema: { type: integer, minimum: 1 }
+    ListingId:
+      name: listing_id
+      in: path
+      required: true
+      description: Numeric identifier of a listing (>= 1).
+      schema: { type: integer, minimum: 1 }
+    PurchaseId:
+      name: purchase_id
+      in: path
+      required: true
+      description: Numeric identifier of a purchase (>= 1).
+      schema: { type: integer, minimum: 1 }
+
+  responses:
+    UnauthorizedError:
+      description: |
+        Missing or invalid authentication for an endpoint that requires it.
+        The server MUST NOT expose whether a given email exists.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          examples:
+            missingHeader:
+              summary: Missing X-User-Email header
+              value: { error: "Unauthorized: missing X-User-Email" }
+    ForbiddenError:
+      description: Authenticated but not permitted to perform the operation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          examples:
+            notOwner:
+              value: { error: "Forbidden: not owner" }
+            notAdmin:
+              value: { error: "Forbidden: admin only" }
+    NotFoundError:
+      description: The requested resource does not exist or is not visible.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          examples:
+            generic:
+              value: { error: "Not found" }
+    ConflictError:
+      description: Request conflicts with the current state (e.g., double action, constraints).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          examples:
+            alreadyTerminal:
+              value: { error: "Conflict: purchase is already terminal" }
+            categoryHasChildren:
+              value: { error: "Conflict: category has children or listings" }
+    BadRequestError:
+      description: The request is syntactically valid JSON but semantically invalid.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          examples:
+            insufficientCredits:
+              value: { error: "Bad request: insufficient credits" }
+            listingNotActive:
+              value: { error: "Bad request: listing not active" }
+    PayloadTooLargeError:
+      description: |
+        The uploaded file exceeds the server’s maximum size limit.
+        The server SHOULD set a clear limit (e.g., 5 MiB) and enforce it strictly.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          examples:
+            tooBig:
+              value: { error: "Payload too large: max 5 MiB" }
+    UnsupportedMediaTypeError:
+      description: |
+        The uploaded file is not one of the allowed image types.
+        Allowed types **MUST** include at least: image/jpeg, image/png, image/webp.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          examples:
+            badType:
+              value: { error: "Unsupported media type: only JPEG, PNG, WEBP" }
+              
+  schemas:
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message in English.
+
+    Email:
+      type: string
+      format: email
+      description: A syntactically valid email address (RFC 5322 local@domain).
+      examples: [ "user@example.com" ]
+
+    MoneyCents:
+      type: integer
+      minimum: 0
+      description: |
+        Currency amount in **euro cents**. Always non-negative in responses.
+        Negative values may appear only as transaction `amount_cents` for
+        debits (e.g., purchases).
+
+    DateTimeUTC:
+      type: string
+      format: date-time
+      description: RFC 3339 timestamp in UTC with a trailing 'Z'.
+      examples: 
+        - "2025-10-07T12:34:56Z"
+
+    User:
+      type: object
+      description: Minimal user representation.
+      required: [email, credits_cents]
+      properties:
+        email: { $ref: '#/components/schemas/Email' }
+        credits_cents:
+          $ref: '#/components/schemas/MoneyCents'
+      examples:
+        - email: "alice@example.com"
+          credits_cents: 3500
+
+    Address:
+      type: object
+      description: |
+        Delivery address owned by a specific user. Address IDs are unique
+        per server (not per user).
+      required: [id, line1, city, postal_code]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          description: Server-assigned unique numeric identifier.
+        line1: { type: string, minLength: 1, maxLength: 200 }
+        line2: { type: [string, "null"], maxLength: 200 }
+        city:  { type: string, minLength: 1, maxLength: 100 }
+        postal_code:
+          type: string
+          description: French postal code (no strict format enforced here).
+          minLength: 1
+          maxLength: 20
+      examples:
+        - id: 42
+          line1: "10 Rue de la Paix"
+          line2: null
+          city: "Nantes"
+          postal_code: "44000"
+
+    Category:
+      type: object
+      description: |
+        Category node in an infinitely nested tree. Use `parent_id = null`
+        for root categories.
+      required: [id, name]
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        parent_id:
+          type: [integer, "null"]
+          minimum: 1
+          description: Parent category id, or null for root.
+      examples:
+        - id: 7
+          name: "Sneakers"
+          parent_id: 3
+
+    Photo:
+      type: object
+      description: Publicly reachable image URL and thumbnail flag.
+      required: [url, is_thumbnail]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Absolute URL (HTTP/HTTPS) pointing to the image.
+        is_thumbnail:
+          type: boolean
+          description: |
+            Exactly 0..1 photos per listing may have `is_thumbnail: true`.
+            If none are `true`, the server MUST set the first photo as the
+            thumbnail automatically.
+      examples:
+        - url: "https://example.com/img/abc123.jpg"
+          is_thumbnail: true
+
+    ListingStatus:
+      type: string
+      enum: [active, sold, deleted]
+      description: |
+        - `active`: visible in browse and purchasable.
+        - `sold`: was purchased; not visible in browse; immutable (except by admin).
+        - `deleted`: removed by seller or due to user deletion; not visible.
+
+    Listing:
+      type: object
+      description: Seller-provided listing without computed totals.
+      required:
+        [ id, seller_email, title, description, price_cents, shipping_cents,
+          category_id, status, photos, created_at ]
+      properties:
+        id: { type: integer, minimum: 1 }
+        seller_email: { $ref: '#/components/schemas/Email' }
+        title: { type: string, minLength: 1, maxLength: 140 }
+        description: { type: string, minLength: 1, maxLength: 5000 }
+        price_cents: { $ref: '#/components/schemas/MoneyCents' }
+        shipping_cents: { $ref: '#/components/schemas/MoneyCents' }
+        category_id: { type: integer, minimum: 1 }
+        status: { $ref: '#/components/schemas/ListingStatus' }
+        photos:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: { $ref: '#/components/schemas/Photo' }
+        created_at: { $ref: '#/components/schemas/DateTimeUTC' }
+      examples:
+        - id: 101
+          seller_email: "alice@example.com"
+          title: "Nike Air Zoom, size 42"
+          description: "Lightly used. Box included."
+          price_cents: 4500
+          shipping_cents: 800
+          category_id: 7
+          status: "active"
+          photos:
+            - { url: "https://cdn.example/x1.jpg", is_thumbnail: true }
+            - { url: "https://cdn.example/x2.jpg", is_thumbnail: false }
+          created_at: "2025-10-07T12:00:00Z"
+
+    ListingWithTotals:
+      allOf:
+        - $ref: '#/components/schemas/Listing'
+        - type: object
+          description: Listing plus server-computed insurance and total.
+          required: [ insurance_part_cents, total_cents ]
+          properties:
+            insurance_part_cents:
+              $ref: '#/components/schemas/MoneyCents'
+            total_cents:
+              $ref: '#/components/schemas/MoneyCents'
+          examples:
+            - id: 101
+              seller_email: "alice@example.com"
+              title: "Nike Air Zoom, size 42"
+              description: "Lightly used. Box included."
+              price_cents: 4500
+              shipping_cents: 800
+              category_id: 7
+              status: "active"
+              photos:
+                - url: "https://cdn.example/x1.jpg"
+                  is_thumbnail: true
+                - url: "https://cdn.example/x2.jpg"
+                  is_thumbnail: false
+              created_at: "2025-10-07T12:00:00Z"
+              insurance_part_cents: 448
+              total_cents: 5748
+
+    BuyerProtectionConfig:
+      type: object
+      description: |
+        Global Buyer-Protection (insurance) parameters applied to **all**
+        totals computations at the time of purchase and when presenting
+        browsed totals.
+
+        **Normative formula**
+
+        Let:
+        - `P = price_cents` (integer)
+        - `r = ratio_percent` (decimal, may include fractional part, e.g. 5.5)
+        - `b = bias_cents` (integer)
+
+        Then:
+        - `percent_part = round_half_up(P * r / 100)`
+        - `insurance_part_cents = percent_part + b`
+        - `total_cents = P + shipping_cents + insurance_part_cents`
+
+        Rounding: `round_half_up(x)` rounds to the nearest integer with
+        halves upwards (e.g., 12.5 → 13, 12.49 → 12, -12.5 → -12). Since
+        `P >= 0` and `r >= 0`, inputs are non-negative.
+
+        **Example:**
+        - `P=10000`, `r=5.5`, `b=200`, `shipping=800`
+        - `percent_part = round_half_up(10000 * 5.5 / 100) = round(550) = 550`
+        - `insurance_part_cents = 550 + 200 = 750`
+        - `total_cents = 10000 + 800 + 750 = 11550`
+      required: [ratio_percent, bias_cents]
+      properties:
+        ratio_percent:
+          type: number
+          minimum: 0
+          description: Percentage rate (e.g., 5.5 means 5.5%).
+        bias_cents:
+          $ref: '#/components/schemas/MoneyCents'
+      examples: 
+        - { ratio_percent: 5.5, bias_cents: 200 }
+
+    CreditTxnType:
+      type: string
+      enum: [topup, purchase, refund, sale_payout]
+      description: Type of credit ledger transaction.
+
+    CreditTxn:
+      type: object
+      required:
+        [ id, type, amount_cents, balance_after_cents, created_at ]
+      properties:
+        id: { type: integer, minimum: 1 }
+        type: { $ref: '#/components/schemas/CreditTxnType' }
+        amount_cents:
+          type: integer
+          description: |
+            Positive for credits added; negative for debits (e.g., purchase).
+        balance_after_cents:
+          $ref: '#/components/schemas/MoneyCents'
+        related_purchase_id:
+          type: [integer, "null"]
+          minimum: 1
+        created_at: { $ref: '#/components/schemas/DateTimeUTC' }
+      examples:
+        - id: 9001
+          type: "purchase"
+          amount_cents: -11550
+          balance_after_cents: 3450
+          related_purchase_id: 555
+          created_at: "2025-10-07T12:05:00Z"
+
+    PurchaseStatus:
+      type: string
+      enum: [paid, delivered, closed, refunded]
+      description: |
+        - `paid`: created and paid by buyer; seller has been credited payout.
+        - `delivered`: optionally used to indicate delivery before declaration.
+        - `closed`: buyer declared OK (final).
+        - `refunded`: buyer declared NOT_OK (refund processed; final).
+
+    Purchase:
+      type: object
+      required:
+        [ id, listing_id, buyer_email, seller_email, item_price_cents,
+          shipping_cents, insurance_part_cents, total_cents, address,
+          status, created_at ]
+      properties:
+        id: { type: integer, minimum: 1 }
+        listing_id: { type: integer, minimum: 1 }
+        buyer_email: { $ref: '#/components/schemas/Email' }
+        seller_email: { $ref: '#/components/schemas/Email' }
+        item_price_cents: { $ref: '#/components/schemas/MoneyCents' }
+        shipping_cents:   { $ref: '#/components/schemas/MoneyCents' }
+        insurance_part_cents: { $ref: '#/components/schemas/MoneyCents' }
+        total_cents: { $ref: '#/components/schemas/MoneyCents' }
+        address:
+          $ref: '#/components/schemas/Address'
+        status: { $ref: '#/components/schemas/PurchaseStatus' }
+        created_at: { $ref: '#/components/schemas/DateTimeUTC' }
+      examples:
+        - id: 555
+          listing_id: 101
+          buyer_email: "bob@example.com"
+          seller_email: "alice@example.com"
+          item_price_cents: 4500
+          shipping_cents: 800
+          insurance_part_cents: 448
+          total_cents: 5748
+          address:
+            id: 77
+            line1: "5 Avenue Anatole"
+            line2: null
+            city: "Paris"
+            postal_code: "75007"
+          status: "paid"
+          created_at: "2025-10-07T12:03:00Z"
+
+    UploadedPhoto:
+      type: object
+      description: |
+        Result of a successful photo upload. The `url` is a fully-qualified,
+        absolute URL (including scheme and host) that can be used in Listing
+        photos. Dereferencing this URL with GET MUST return the original binary.
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: |
+            Absolute URL to the uploaded photo (e.g., `http://localhost:5000/api/photos/buyer1@example.com-1f9a5c3b8d.jpg`).
+            Servers MUST include scheme and host, derived from the incoming request
+            (Host header) or server configuration.
+        mime_type:
+          type: string
+          description: IANA media type of the stored image (e.g., image/jpeg).
+          examples: [ "image/jpeg" ]
+          
+security:
+  - testUserHeader: []
+
+paths:
+
+  # --------------------------------------------------------------------
+  # CATEGORIES (public read; admin CRUD (Create, Read, Update, Delete))
+  # --------------------------------------------------------------------
+  /api/categories:
+    get:
+      tags: [categories]
+      operationId: listCategories
+      summary: List all categories as a flat collection
+      description: |
+        Returns **all** categories as a flat list. Each category includes
+        its `parent_id` (or `null` for roots). Clients can rebuild the tree
+        by following `parent_id` links.
+
+        Notes:
+        - IDs are stable and unique.
+        - There is no pagination (category counts are expected to be small).
+      responses:
+        '200':
+          description: Array of categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+              examples:
+                sample:
+                  value:
+                    - { id: 1, name: "Clothing", parent_id: null }
+                    - { id: 2, name: "Shoes", parent_id: 1 }
+                    - { id: 7, name: "Sneakers", parent_id: 2 }
+
+    post:
+      tags: [categories]
+      operationId: createCategory
+      summary: Create a category (admin only)
+      description: |
+        Creates a new category. Caller MUST be admin. `parent_id` may be
+        omitted or null for a root node. Category names need not be unique
+        globally (but keeping them distinct is recommended).
+      security: [ { testUserHeader: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+                parent_id:
+                  type: [integer, "null"]
+                  minimum: 1
+            examples:
+              root:
+                value: { name: "Accessories", parent_id: null }
+              child:
+                value: { name: "Sneakers", parent_id: 2 }
+      responses:
+        '201':
+          description: Created category
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+
+  /api/categories/{category_id}:
+    delete:
+      tags: [categories]
+      operationId: deleteCategory
+      summary: Delete a category (admin only)
+      description: |
+        Deletes the category if and only if it has **no child categories**
+        and **no listings** assigned (directly or through descendants).
+        Otherwise, the server MUST return 409 Conflict.
+      security: [ { testUserHeader: [] } ]
+      parameters: [ { $ref: '#/components/parameters/CategoryId' } ]
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+
+  # --------------------------------------------------------------------
+  # BUYER-PROTECTION CONFIG (admin read/write, public read)
+  # --------------------------------------------------------------------
+  /api/config/buyer-protection:
+    get:
+      tags: [config]
+      operationId: getBuyerProtection
+      summary: Read Buyer-Protection configuration
+      description: Returns the global Buyer-Protection parameters.
+      responses:
+        '200':
+          description: Current configuration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BuyerProtectionConfig' }
+              examples:
+                sample: { value: { ratio_percent: 5.5, bias_cents: 200 } }
+
+    put:
+      tags: [config]
+      operationId: setBuyerProtection
+      summary: Set Buyer-Protection configuration (admin only)
+      description: |
+        Replaces the global configuration. Caller MUST be admin. Changes
+        apply to future computations and browse totals. Purchases MUST
+        store a snapshot of the computed insurance and total at creation.
+      security: [ { testUserHeader: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BuyerProtectionConfig' }
+            examples:
+              example1: { value: { ratio_percent: 5.5, bias_cents: 200 } }
+      responses:
+        '200': { description: Updated }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+
+  # --------------------------------------------------------------------
+  # USERS (public registration; admin deletion)
+  # --------------------------------------------------------------------
+  /api/users:
+    post:
+      tags: [users]
+      operationId: registerUser
+      summary: Register a user account (email + password)
+      description: |
+        Creates a new user. The email is the unique account identifier.
+        No email verification is performed. Password change endpoints are
+        out of scope for Tier A.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { $ref: '#/components/schemas/Email' }
+                password:
+                  type: string
+                  minLength: 4
+                  maxLength: 200
+                  description: Stored server-side as a salted hash.
+            examples:
+              ok:
+                value: { email: "alice@example.com", password: "secret" }
+      responses:
+        '201':
+          description: Created user (initial credits are zero)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+              examples:
+                ok:
+                  value: { email: "alice@example.com", credits_cents: 0 }
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+              examples:
+                dup:
+                  value: { error: "Conflict: email already exists" }
+
+  /api/users/{email}:
+    delete:
+      tags: [users]
+      operationId: adminDeleteUser
+      summary: Admin delete a user (and hide their listings)
+      description: |
+        Admin-only. Logically deletes the user and sets all their active
+        listings to `deleted` (thus hidden from browse). The user cannot
+        log in thereafter. Existing purchases remain visible to the other
+        party and admin; credits ledger is frozen (no new operations).
+      security: [ { testUserHeader: [] } ]
+      parameters:
+        - name: email
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Email' }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+
+  # --------------------------------------------------------------------
+  # ADDRESSES (auth required)
+  # --------------------------------------------------------------------
+  /api/addresses:
+    get:
+      tags: [addresses]
+      operationId: listMyAddresses
+      summary: List the authenticated user’s addresses
+      security: [ { testUserHeader: [] } ]
+      responses:
+        '200':
+          description: Array of addresses owned by the caller
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Address' }
+              examples:
+                sample:
+                  value:
+                    - { id: 77, line1: "5 Avenue Anatole", line2: null, city: "Paris", postal_code: "75007" }
+
+    post:
+      tags: [addresses]
+      operationId: addAddress
+      summary: Add a new address to the authenticated user
+      security: [ { testUserHeader: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              # Note: id is server-assigned; client must NOT send it.
+              type: object
+              required: [line1, city, postal_code]
+              properties:
+                line1: { type: string, minLength: 1, maxLength: 200 }
+                line2: { type: [string, "null"], maxLength: 200 }
+                city:  { type: string, minLength: 1, maxLength: 100 }
+                postal_code: { type: string, minLength: 1, maxLength: 20 }
+            examples:
+              ok:
+                value: { line1: "10 Rue de la Paix", line2: null, city: "Nantes", postal_code: "44000" }
+      responses:
+        '201':
+          description: Created address
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Address' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+
+  /api/addresses/{address_id}:
+    put:
+      tags: [addresses]
+      operationId: replaceAddress
+      summary: Replace (update) an address owned by the authenticated user
+      description: |
+        Full update. The request body MUST include all mutable fields
+        (line1, line2, city, postal_code). The `id` in the body, if present,
+        MUST be ignored by the server.
+      security: [ { testUserHeader: [] } ]
+      parameters: [ { $ref: '#/components/parameters/AddressId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [line1, city, postal_code]
+              properties:
+                line1: { type: string, minLength: 1, maxLength: 200 }
+                line2: { type: [string, "null"], maxLength: 200 }
+                city:  { type: string, minLength: 1, maxLength: 100 }
+                postal_code: { type: string, minLength: 1, maxLength: 20 }
+            examples:
+              replaceAll:
+                value: { line1: "99 Quai de Jemmapes", line2: "Bât A", city: "Paris", postal_code: "75010" }
+      responses:
+        '200':
+          description: Updated address
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Address' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+    delete:
+      tags: [addresses]
+      operationId: deleteAddress
+      summary: Delete an address owned by the authenticated user
+      security: [ { testUserHeader: [] } ]
+      parameters: [ { $ref: '#/components/parameters/AddressId' } ]
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  # --------------------------------------------------------------------
+  # LISTINGS (seller CRUD; public GET)
+  # --------------------------------------------------------------------
+  /api/listings:
+    post:
+      tags: [listings]
+      operationId: createListing
+      summary: Create a listing (authenticated seller)
+      security: [ { testUserHeader: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                [ title, description, price_cents, shipping_cents, category_id, photos ]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 140 }
+                description: { type: string, minLength: 1, maxLength: 5000 }
+                price_cents: { $ref: '#/components/schemas/MoneyCents' }
+                shipping_cents: { $ref: '#/components/schemas/MoneyCents' }
+                category_id: { type: integer, minimum: 1 }
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 12
+                  items: { $ref: '#/components/schemas/Photo' }
+            examples:
+              ok:
+                value:
+                  title: "Vans Old Skool, 42"
+                  description: "Used twice."
+                  price_cents: 3500
+                  shipping_cents: 700
+                  category_id: 7
+                  photos:
+                    - { url: "https://cdn.example/v1.jpg", is_thumbnail: true }
+                    - { url: "https://cdn.example/v2.jpg", is_thumbnail: false }
+      responses:
+        '201':
+          description: Created listing (status is `active`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Listing' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+
+  /api/listings/{listing_id}:
+    get:
+      tags: [listings]
+      operationId: getListing
+      summary: Get a listing by id (public if active)
+      description: |
+        Returns the listing if:
+        - it is `active`, or
+        - the caller is the seller, or
+        - the caller is admin.
+
+        If a listing is `deleted`, the server MUST return 404 to non-admin
+        callers.
+      parameters: [ { $ref: '#/components/parameters/ListingId' } ]
+      responses:
+        '200':
+          description: Listing found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Listing' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+    put:
+      tags: [listings]
+      operationId: replaceListing
+      summary: Replace (update) an `active` listing (seller only)
+      description: |
+        Full update. Only the seller (or admin) may update, and only while
+        the listing is `active`. The request body MUST include all mutable
+        fields; fields not provided MUST be considered cleared/overwritten
+        (e.g., `photos` array is replaced as a whole).
+      security: [ { testUserHeader: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ListingId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              # Same shape as create, minus server fields.
+              type: object
+              required:
+                [ title, description, price_cents, shipping_cents, category_id, photos ]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 140 }
+                description: { type: string, minLength: 1, maxLength: 5000 }
+                price_cents: { $ref: '#/components/schemas/MoneyCents' }
+                shipping_cents: { $ref: '#/components/schemas/MoneyCents' }
+                category_id: { type: integer, minimum: 1 }
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 12
+                  items: { $ref: '#/components/schemas/Photo' }
+            examples:
+              changePrice:
+                value:
+                  title: "Vans Old Skool, 42"
+                  description: "Used twice. Minor scuff."
+                  price_cents: 3200
+                  shipping_cents: 700
+                  category_id: 7
+                  photos:
+                    - { url: "https://cdn.example/v1.jpg", is_thumbnail: true }
+      responses:
+        '200':
+          description: Updated listing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Listing' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '400': { $ref: '#/components/responses/BadRequestError' }
+
+    delete:
+      tags: [listings]
+      operationId: deleteListing
+      summary: Delete a listing (seller only)
+      description: |
+        Marks the listing as `deleted` and makes it not retrievable by
+        non-admin callers. A listing that is already `sold` MUST NOT be
+        deletable by the seller (return 403).
+      security: [ { testUserHeader: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ListingId' } ]
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  # --------------------------------------------------------------------
+  # BROWSE (public search + totals, no auth required)
+  # --------------------------------------------------------------------
+  /api/browse/listings:
+    get:
+      tags: [browse]
+      operationId: browseListings
+      summary: Public browse/search with server-computed totals
+      description: |
+        Returns a paginated list of **active** listings, each with computed
+        `insurance_part_cents` and `total_cents` using the current global
+        Buyer-Protection configuration.
+
+        Filters:
+        - `q`: case-insensitive substring search in **title OR description**.
+        - `category_id`: include items in this category **and all its
+          descendants** (drill-down).
+        - `min_price_cents` / `max_price_cents`: item price only (no shipping).
+        - `min_total_cents` / `max_total_cents`: computed total with insurance.
+        - `sort`: `price` or `total` (ties broken by `id ASC`).
+        - `order`: `asc` (default) or `desc`.
+        - Pagination: `page` (1-based) and `page_size` (max 50).
+
+        **Computation example** (with config r=5.5, b=200):
+        - price=4500, shipping=800 → percent_part=round(4500*5.5/100)=248
+          → insurance=248+200=448 → total=4500+800+448=5748.
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string, minLength: 1, maxLength: 200 }
+          description: Case-insensitive substring applied to title OR description.
+        - in: query
+          name: category_id
+          schema: { type: integer, minimum: 1 }
+          description: Include the category and all its descendants.
+        - in: query
+          name: min_price_cents
+          schema: { $ref: '#/components/schemas/MoneyCents' }
+        - in: query
+          name: max_price_cents
+          schema: { $ref: '#/components/schemas/MoneyCents' }
+        - in: query
+          name: min_total_cents
+          schema: { $ref: '#/components/schemas/MoneyCents' }
+        - in: query
+          name: max_total_cents
+          schema: { $ref: '#/components/schemas/MoneyCents' }
+        - in: query
+          name: sort
+          schema: { type: string, enum: [price, total] }
+          description: Sort primary key.
+        - in: query
+          name: order
+          schema: { type: string, enum: [asc, desc], default: asc }
+          description: Sort direction.
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 50, default: 12 }
+      responses:
+        '200':
+          description: Page of results with totals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total_items, page, page_size]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ListingWithTotals' }
+                  total_items: { type: integer, minimum: 0 }
+                  page: { type: integer, minimum: 1 }
+                  page_size: { type: integer, minimum: 1, maximum: 50 }
+              examples:
+                page1:
+                  value:
+                    items:
+                      - id: 101
+                        seller_email: "alice@example.com"
+                        title: "Nike Air Zoom, size 42"
+                        description: "Lightly used. Box included."
+                        price_cents: 4500
+                        shipping_cents: 800
+                        category_id: 7
+                        status: "active"
+                        photos:
+                          - { url: "https://cdn.example/x1.jpg", is_thumbnail: true }
+                        created_at: "2025-10-07T12:00:00Z"
+                        insurance_part_cents: 448
+                        total_cents: 5748
+                    total_items: 37
+                    page: 1
+                    page_size: 12
+
+  # --------------------------------------------------------------------
+  # CREDITS (auth required)
+  # --------------------------------------------------------------------
+  /api/credits/topup:
+    post:
+      tags: [credits]
+      operationId: topupCredits
+      summary: Magic top-up credits for the authenticated user
+      description: |
+        Increases the caller’s credits by the requested amount. Records a
+        `topup` transaction. Amount MUST be >= 1 cent.
+      security: [ { testUserHeader: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount_cents]
+              properties:
+                amount_cents:
+                  $ref: '#/components/schemas/MoneyCents'
+            examples:
+              example1: { value: { amount_cents: 20000 } }
+      responses:
+        '201':
+          description: New balance after top-up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balance_cents]
+                properties:
+                  balance_cents: { $ref: '#/components/schemas/MoneyCents' }
+              examples:
+                result: { value: { balance_cents: 25000 } }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+
+  /api/credits/ledger:
+    get:
+      tags: [credits]
+      operationId: getLedger
+      summary: Get the authenticated user’s credit transactions and balance
+      security: [ { testUserHeader: [] } ]
+      responses:
+        '200':
+          description: Current balance and the full ledger (most recent first)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balance_cents, txns]
+                properties:
+                  balance_cents: { $ref: '#/components/schemas/MoneyCents' }
+                  txns:
+                    type: array
+                    items: { $ref: '#/components/schemas/CreditTxn' }
+              examples:
+                example1:
+                  value:
+                    balance_cents: 3450
+                    txns:
+                      - { id: 9001, type: "purchase", amount_cents: -11550, balance_after_cents: 3450, related_purchase_id: 555, created_at: "2025-10-07T12:05:00Z" }
+                      - { id: 9000, type: "topup", amount_cents: 15000, balance_after_cents: 15000, related_purchase_id: null, created_at: "2025-10-07T12:00:00Z" }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+
+  # --------------------------------------------------------------------
+  # PURCHASES (auth required)
+  # --------------------------------------------------------------------
+  /api/purchases:
+    get:
+      tags: [purchases]
+      operationId: listPurchases
+      summary: List purchases for the caller, filtered by role
+      description: |
+        Returns purchases where the caller is either the buyer or the
+        seller. Default role is `buyer`.
+      security: [ { testUserHeader: [] } ]
+      parameters:
+        - in: query
+          name: role
+          schema: { type: string, enum: [buyer, seller], default: buyer }
+      responses:
+        '200':
+          description: Array of purchases
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Purchase' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+
+    post:
+      tags: [purchases]
+      operationId: createPurchase
+      summary: Create a purchase using credits; marks listing as sold
+      description: |
+        Preconditions:
+        - Caller is authenticated and NOT the seller of the listing.
+        - Listing exists and has status `active`.
+        - Caller has **sufficient credits** for `total_cents`.
+
+        Effects:
+        - Debits buyer by `total_cents` (records `purchase` txn).
+        - Credits seller by `item_price_cents + shipping_cents` (records `sale_payout` txn).
+        - Stores address snapshot and computed amounts.
+        - Sets listing status to `sold`.
+
+        Error cases:
+        - 400 if insufficient credits or listing not active.
+        - 404 if listing or address not found.
+      security: [ { testUserHeader: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [listing_id, address_id]
+              properties:
+                listing_id: { type: integer, minimum: 1 }
+                address_id: { type: integer, minimum: 1 }
+            examples:
+              ok:
+                value: { listing_id: 101, address_id: 77 }
+      responses:
+        '201':
+          description: Created purchase
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Purchase' }
+        '400': { $ref: '#/components/responses/BadRequestError' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /api/purchases/{purchase_id}:
+    get:
+      tags: [purchases]
+      operationId: getPurchase
+      summary: Get purchase by id (buyer/seller only)
+      description: |
+        Returns the purchase if and only if the caller is the buyer, the
+        seller, or admin. Otherwise 403. If the purchase does not exist,
+        return 404.
+      security: [ { testUserHeader: [] } ]
+      parameters: [ { $ref: '#/components/parameters/PurchaseId' } ]
+      responses:
+        '200':
+          description: Purchase found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Purchase' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /api/purchases/{purchase_id}/declare:
+    post:
+      tags: [purchases]
+      operationId: declarePurchaseOutcome
+      summary: Buyer declares outcome (OK / NOT_RECEIVED / NOT_AS_DESCRIBED)
+      description: |
+        Callable **only by the buyer** of this purchase. May be called
+        **exactly once** while status is `paid` or `delivered`.
+
+        - `OK` → status `closed`; no balance changes.
+        - `NOT_RECEIVED` or `NOT_AS_DESCRIBED` → refund exactly
+          `(item_price_cents + shipping_cents)` to the buyer’s credits
+          (type `refund`), keep the insurance; status `refunded`.
+
+        Returns 409 if already in a terminal status (`closed` or `refunded`).
+      security: [ { testUserHeader: [] } ]
+      parameters: [ { $ref: '#/components/parameters/PurchaseId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [OK, NOT_RECEIVED, NOT_AS_DESCRIBED]
+            examples:
+              ok:             { value: { status: "OK" } }
+              notReceived:    { value: { status: "NOT_RECEIVED" } }
+              notAsDescribed: { value: { status: "NOT_AS_DESCRIBED" } }
+      responses:
+        '200': { description: Outcome recorded }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+        
+        
+  /api/photos:
+    post:
+      tags: [photos]
+      operationId: uploadPhoto
+      summary: Upload a photo and get its absolute URL
+      description: |
+        Uploads a single image to the server and returns the **absolute URL**
+        that can be referenced in listing photo objects.
+
+        **Authentication:** required (`X-User-Email`).
+        **Content type:** `multipart/form-data` with one part named `file`.
+        **Allowed media types:** `image/jpeg`, `image/png`, `image/webp`.
+        **Max size:** the server MUST enforce a concrete limit (e.g., 5 MiB) and
+        return **413** if exceeded.
+        **File name / URL shape:** The server MAY rename or hash the file; the
+        returned URL is an opaque identifier for clients. Clients MUST NOT make
+        assumptions about extensions or directory layout.
+        **Idempotency:** The server MAY deduplicate content (same bytes → same URL)
+        or store duplicates; clients MUST NOT depend on either behavior.
+
+        The server SHOULD also set a `Location` header to the returned URL.
+      security: [ { testUserHeader: [] } ]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The image file to upload.
+            encoding:
+              file:
+                contentType: image/jpeg, image/png, image/webp
+      responses:
+        '201':
+          description: Photo stored; absolute URL returned
+          headers:
+            Location:
+              description: Absolute URL of the stored photo (same as `url` in the body).
+              schema: { type: string, format: uri }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadedPhoto' }
+              examples:
+                ok:
+                  value:
+                    url: "http://localhost:5000/api/photos/buyer1@example.com-1f9a5c3b8d.jpg"
+                    mime_type: "image/jpeg"
+        '400':
+          description: Missing form part or invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+              examples:
+                missingFile:
+                  value: { error: "Bad request: missing form field 'file'" }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '413': { $ref: '#/components/responses/PayloadTooLargeError' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaTypeError' }
+
+  /api/photos/{photo_id}:
+    get:
+      tags: [photos]
+      operationId: getPhotoBinary
+      summary: Retrieve an uploaded photo (binary)
+      description: |
+        Returns the original stored image **as binary**. This endpoint is public
+        (no authentication), since listing pages need to embed images.
+
+        - The server MUST respond with the original image’s `Content-Type`
+          (e.g., `image/jpeg`, `image/png`, `image/webp`).
+        - The server MAY apply standard cache headers (e.g., `Cache-Control`).
+        - `photo_id` is an **opaque** identifier (it may include an extension).
+
+        The absolute URL returned by `POST /api/photos` will have the shape
+        `http://<host>/api/photos/{photo_id}` pointing here.
+      parameters:
+        - name: photo_id
+          in: path
+          required: true
+          description: |
+            Opaque photo identifier. Treat as a literal path segment that uniquely
+            identifies the stored image. It MAY include characters such as
+            letters, digits, dash, underscore, and dot (e.g., a filename with extension).
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+      responses:
+        '200':
+          description: Binary image
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFoundError' }
