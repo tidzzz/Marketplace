@@ -1,1 +1,2 @@
-falsk
+flask
+Flask-SQLAlchemy
