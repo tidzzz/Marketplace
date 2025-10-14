@@ -13,7 +13,24 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Recommandé pour désacti
 # Créer l'objet qui représente la connexion à la base de données
 db = SQLAlchemy(app)
 
-# --- On définira les modèles (tables) ici plus tard ---
+# DÉFINITION DU MODÈLE USER
+#    Cette classe hérite de db.Model. SQLAlchemy sait alors
+#    qu'elle correspond à une table.
+class User(db.Model):
+    # __tablename__ est optionnel, mais c'est une bonne pratique de le nommer explicitement.
+    __tablename__ = 'users'
+
+    id = db.Column(db.Integer, primary_key=True)
+    
+    email = db.Column(db.String(120), unique=True, nullable=False)
+
+    password_hash = db.Column(db.String(200), nullable=False)
+    
+    credits_cents = db.Column(db.Integer, nullable=False, default=0)
+
+    
+    def __repr__(self):
+        return f'<User {self.email}>'
 
 
 
