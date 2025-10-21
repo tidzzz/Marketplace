@@ -3,6 +3,7 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 
 app = Flask(__name__)
 
@@ -11,6 +12,18 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///data.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Recommandé pour désactiver les notifications inutiles
 
 db = SQLAlchemy(app)
+
+# DÉCORATEUR POUR PROTÉGER LES ROUTES ADMIN
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # On vérifie la présence et la valeur de l'en-tête X-User-Email
+        if request.headers.get('X-User-Email') != 'admin@imt.test':
+            # Si ce n'est pas l'admin, on renvoie une erreur 403 Forbidden
+            return jsonify({"error": "Forbidden: admin only"}), 403
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 # DÉFINITION DU MODÈLE USER
 #    Cette classe hérite de db.Model. SQLAlchemy sait alors
@@ -28,6 +41,60 @@ class User(db.Model):
     
     def __repr__(self):
         return f'<User {self.email}>'
+    
+
+class Category(db.Model):
+    __tablename__ = 'categories'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    
+    
+    parent_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True)
+
+    def to_dict(self):
+        
+        return {
+            "id": self.id,
+            "name": self.name,
+            "parent_id": self.parent_id
+        }
+
+    def __repr__(self):
+        return f'<Category {self.name}>'
+
+
+@app.route('/api/categories', methods=['GET'])
+def list_categories():
+    #Récupérer toutes les catégories de la base de données
+    categories = Category.query.all()
+    
+    #Convertir chaque objet Category en dictionnaire
+    categories_list = [category.to_dict() for category in categories]
+    
+    #Renvoyer la liste en JSON
+    return jsonify(categories_list), 200
+
+
+@app.route('/api/categories', methods=['POST'])
+@admin_required 
+def create_category():
+    data = request.get_json()
+    if not data or 'name' not in data:
+        return jsonify({"error": "Bad request: missing name"}), 400
+
+    name = data['name']
+    # parent_id est optionnel, on utilise .get() pour éviter une erreur s'il est absent
+    parent_id = data.get('parent_id') 
+
+    new_category = Category(name=name, parent_id=parent_id)
+    
+    db.session.add(new_category)
+    db.session.commit()
+    
+    return jsonify(new_category.to_dict()), 201
+
+
 
 
 @app.route('/api/users', methods=['POST'])
