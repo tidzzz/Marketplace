@@ -13,8 +13,6 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Recommandé pour désacti
 
 db = SQLAlchemy(app)
 
-<<<<<<< HEAD
-=======
 # DÉCORATEUR POUR PROTÉGER LES ROUTES ADMIN
 def admin_required(f):
     @wraps(f)
@@ -26,7 +24,6 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
->>>>>>> 383df12d646af3d8ada91fd61d9ec26b1aa801c4
 
 # DÉFINITION DU MODÈLE USER
 #    Cette classe hérite de db.Model. SQLAlchemy sait alors
