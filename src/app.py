@@ -1,17 +1,20 @@
 
 
 from flask import Flask, jsonify, request, render_template
-from flask_sqlalchemy import SQLAlchemy
+from database.database import db, init_database
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 
 app = Flask(__name__)
 
 # Configurer la base de données
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///data.db'
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///../database/database.db" #precise the place of the database
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Recommandé pour désactiver les notifications inutiles
 
-db = SQLAlchemy(app)
+db.init_app(app) # (1) flask prend en compte la base de donnee
+with app.test_request_context(): # (2) bloc exécuté à l'initialisation de Flask
+    init_database()
+
 
 # DÉCORATEUR POUR PROTÉGER LES ROUTES ADMIN
 def admin_required(f):
@@ -144,8 +147,5 @@ def test():
     return render_template("layout.html.jinja2")
 
 if __name__ == '__main__':
-    
-    with app.app_context():
-        db.create_all()
     app.run(debug=True, port=5000)
 
