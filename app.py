@@ -1,11 +1,12 @@
 from functools import wraps
 from flask import Flask, jsonify, request, render_template, make_response #, url_for, redirect
+from flask_cors import CORS
 from database.database import db, init_database
 from database.models import *
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-
+CORS(app)
 # Configurer la base de données
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///../database/database.db" #precise the place of the database
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Recommandé pour désactiver les notifications inutiles
