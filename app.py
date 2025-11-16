@@ -1,10 +1,8 @@
-
-
-from flask import Flask, jsonify, request, render_template
+from functools import wraps
+from flask import Flask, jsonify, request, render_template, make_response #, url_for, redirect
 from database.database import db, init_database
 from database.models import *
 from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps
 
 app = Flask(__name__)
 
@@ -107,6 +105,12 @@ def hello():
 @app.route('/test',methods=['GET'])
 def test():
     return render_template("layout.html.jinja2")
+
+@app.route('/api/addresses',methods=['GET'])
+# @login_required il faut qu'on utilise flask_login
+def api_addresses_get():
+    addresses=Address.query.filter_by()
+#route à finir, user a ete mal fait tidou 
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

@@ -39,3 +39,35 @@ class Category(db.Model):
     def __repr__(self):
         return f'<Category {self.name}>'
 
+class Address(db.Model):
+    __tablename__ = 'addresses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    line1 = db.Column(db.String(200), nullable=False)
+    line2 = db.Column(db.String(200), nullable=True)
+    city = db.Column(db.String(100), nullable=False)
+    postal_code = db.Column(db.String(20), nullable=False)
+
+    def __init__(self,
+                 id: int,
+                 line1: str,
+                 line2: str | None,
+                 city: str, postal_code: str) -> None:
+
+        if (id>=1 and 1<=len(line1)<=200) and (line2 is None or 0<=len(line2)<=200) and (1<=len(city)<=100) and (1<=len(postal_code)<=20):
+            self.id = id
+            self.line1 = line1
+            self.line2 = line2
+            self.city = city
+            self.postal_code = postal_code
+        else:
+            raise ValueError("Adress too long or too short")
+    
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "line1": self.line1,
+            "line2": self.line2,
+            "city": self.city,
+            "postal_code": self.postal_code
+        }
