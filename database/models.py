@@ -1,5 +1,5 @@
+from sqlalchemy.orm import validates
 from database.database import db
-
 
 # DÉFINITION DU MODÈLE USER
 #    Cette classe hérite de db.Model. SQLAlchemy sait alors
@@ -24,12 +24,9 @@ class Category(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
-    
-    
     parent_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True)
 
     def to_dict(self):
-        
         return {
             "id": self.id,
             "name": self.name,
@@ -48,20 +45,30 @@ class Address(db.Model):
     city = db.Column(db.String(100), nullable=False)
     postal_code = db.Column(db.String(20), nullable=False)
 
-    def __init__(self,
-                 id: int,
-                 line1: str,
-                 line2: str | None,
-                 city: str, postal_code: str) -> None:
-
-        if (id>=1 and 1<=len(line1)<=200) and (line2 is None or 0<=len(line2)<=200) and (1<=len(city)<=100) and (1<=len(postal_code)<=20):
-            self.id = id
-            self.line1 = line1
-            self.line2 = line2
-            self.city = city
-            self.postal_code = postal_code
-        else:
-            raise ValueError("Adress too long or too short")
+    user_email = db.Column(db.String(120), db.ForeignKey('users.email'), nullable=False)
+    @validates('line1')
+    def validate_line1(self, key, value):
+        if not value or len(value.strip()) < 1:
+            raise ValueError("line1 must be at least 1 character")
+        if len(value) > 200:
+            raise ValueError("line1 must be at most 200 characters")
+        return value
+    
+    @validates('city')
+    def validate_city(self, key, value):
+        if not value or len(value.strip()) < 1:
+            raise ValueError("city must be at least 1 character")
+        if len(value) > 100:
+            raise ValueError("city must be at most 100 characters")
+        return value
+    
+    @validates('postal_code')
+    def validate_postal_code(self, key, value):
+        if not value or len(value.strip()) < 1:
+            raise ValueError("postal_code must be at least 1 character")
+        if len(value) > 20:
+            raise ValueError("postal_code must be at most 20 characters")
+        return value
     
     def to_dict(self) -> dict:
         return {
@@ -71,3 +78,6 @@ class Address(db.Model):
             "city": self.city,
             "postal_code": self.postal_code
         }
+    
+    def __repr__(self):
+        return f'<Address {self.id}: {self.line1}, {self.city}>'
