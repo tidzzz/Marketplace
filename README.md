@@ -1,93 +1,123 @@
 # API Abilan Tidiane
-Tidiane Tall
-Abilan Ithayakumar
 
-## Getting started
+API minimaliste d’un marketplace seconde-main construite avec Flask + SQLAlchemy et une base SQLite. Elle expose des endpoints pour gérer les utilisateurs, catégories et adresses, avec un schéma OpenAPI fourni.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Stack
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- Python (Flask)
+- SQLAlchemy (ORM) + SQLite
+- Flask-CORS
+- OpenAPI 3.1 (`full_openapi.yaml`)
 
-## Add your files
+## Structure du projet
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```text
+app.py                    # Entrée de l'application Flask (app:app)
+full_openapi.yaml         # Spécification OpenAPI de référence (Tier A)
+requirements.txt          # Dépendances Python
+database/
+  database.py             # Initialisation SQLAlchemy
+  models.py               # Modèles User, Category, Address
+  database.db             # Fichier SQLite (créé au premier run)
+src/
+  templates/
+    layout.html.jinja2    # Template de test /test
 ```
-cd existing_repo
-git remote add origin https://gitlab-df.imt-atlantique.fr/web-app-2025-2026/api-abilan-tidiane.git
-git branch -M main
-git push -uf origin main
+
+## Lancer en local (dev)
+
+
+1. Créez un environnement virtuel et installez les dépendances
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## Integrate with your tools
+1. Démarrez l’API
 
-- [ ] [Set up project integrations](https://gitlab-df.imt-atlantique.fr/web-app-2025-2026/api-abilan-tidiane/-/settings/integrations)
+```bash
+python app.py
+```
 
-## Collaborate with your team
+Par défaut, l’API écoute sur <http://127.0.0.1:5000>
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+Notes:
 
-## Test and Deploy
+- La base SQLite est créée automatiquement (tables) au premier lancement.
+- Le fichier cible attendu est `database/database.db`.
 
-Use the built-in continuous integration in GitLab.
+## Authentification de test (en-tête)
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+Pour les endpoints qui requièrent un utilisateur, utilisez l’en-tête HTTP suivant:
 
-***
+```text
+X-User-Email: <email-utilisateur>
+```
 
-# Editing this README
+- L’admin de test est `admin@imt.test` (à utiliser pour les routes admin uniquement).
+- Pour créer un utilisateur standard: `POST /api/users` avec `{ "email": "...", "password": "..." }`.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+## Endpoints principaux (implémentés jusqu'à maintenant)
 
-## Suggestions for a good README
+- `GET /api/categories` — liste toutes les catégories
+- `POST /api/categories` — crée une catégorie (réservé admin: `X-User-Email: admin@imt.test`)
+- `POST /api/users` — enregistre un utilisateur (hash du mot de passe)
+- `GET /api/addresses` — liste les adresses de l’utilisateur connecté (en-tête requis)
+- `POST /api/addresses` — crée une adresse pour l’utilisateur connecté
+- `PUT /api/addresses/{id}` — modifie une adresse de l’utilisateur connecté
+- `DELETE /api/addresses/{id}` — supprime une adresse de l’utilisateur connecté
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Autres routes:
 
-## Name
-Choose a self-explaining name for your project.
+- `/` — ping simple
+- `/test` — rend le template `layout.html.jinja2`
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+Pour une description complète de l’API cible (obligations côté tests), se référer à `full_openapi.yaml`.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## Exemples rapides (curl)
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Créer un utilisateur:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```bash
+curl -X POST http://127.0.0.1:5000/api/users \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice@example.com","password":"secret"}'
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+Lister ses adresses (avec authentification par en-tête):
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+curl -X GET http://127.0.0.1:5000/api/addresses \
+  -H 'X-User-Email: alice@example.com'
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Créer une catégorie (admin):
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+```bash
+curl -X POST http://127.0.0.1:5000/api/categories \
+  -H 'Content-Type: application/json' \
+  -H 'X-User-Email: admin@imt.test' \
+  -d '{"name":"Mode","parent_id":null}'
+```
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## Base de données
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+- Moteur: SQLite (fichier dans `database/database.db`).
+- Initialisation: automatique au démarrage via `init_database()`.
+- Réinitialiser (attention, destructive):
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```bash
+rm -f database/database.db
+python app.py
+```
 
-## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+## Dépannage
+
+- 404 ou 401 sur des routes protégées: vérifiez l’en-tête `X-User-Email`.
+- 403 sur création de catégories: l’en-tête doit être exactement `admin@imt.test`.
+- Base non créée: supprimez `database/database.db` puis relancez; vérifiez que vous lancez depuis la racine du projet.
+
+
