@@ -318,6 +318,80 @@ def get_listing(listing_id):
     # Sinon, on cache l'annonce (404 pour deleted, et aussi pour sold selon la spec stricte)
     return jsonify({"error": "Not found"}), 404
 
+@app.route('/api/listings/<int:listing_id>', methods=['PUT'])
+@authenticated_required
+def update_listing(user, listing_id):
+    listing = Listing.query.get(listing_id)
+    if not listing:
+        return jsonify({"error": "Not found"}), 404
+        
+    # Vérifier que l'utilisateur est le vendeur ou admin
+    if listing.seller_email != user.email and user.email != 'admin@imt.test':
+        return jsonify({"error": "Forbidden: not owner"}), 403
+        
+    # Vérifier que l'annonce est active
+    if listing.status != 'active':
+        return jsonify({"error": "Bad request: listing not active"}), 400
+        
+    data = request.get_json()
+    
+    
+    required_fields = ['title', 'description', 'price_cents', 'shipping_cents', 'category_id', 'photos']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"error": f"Bad request: missing {field}"}), 400
+            
+    category = Category.query.get(data['category_id'])
+    if not category:
+        return jsonify({"error": "Bad request: invalid category_id"}), 400
+
+      
+        
+    photos_data = data['photos']
+    if not isinstance(photos_data, list) or len(photos_data) < 1:
+        return jsonify({"error": "Bad request: photos must be a non-empty list"}), 400
+    if len(photos_data) > 12:
+         return jsonify({"error": "Bad request: too many photos (max 12)"}), 400
+
+    try:
+        
+        listing.title = data['title']
+        listing.description = data['description']
+        listing.price_cents = data['price_cents']
+        listing.shipping_cents = data['shipping_cents']
+        listing.category_id = data['category_id']
+        
+        # Remplacement complet des photos
+        # On supprime les anciennes photos 
+        ListingPhoto.query.filter_by(listing_id=listing.id).delete()
+        
+        # Gestion des nouvelles photos
+        thumbnail_count = sum(1 for p in photos_data if p.get('is_thumbnail', False))
+        if thumbnail_count > 1:
+             return jsonify({"error": "Bad request: at most one photo can be a thumbnail"}), 400
+        
+        listing_photos = []
+        for photo_data in photos_data:
+            if 'url' not in photo_data:
+                 return jsonify({"error": "Bad request: photo missing url"}), 400
+            
+            is_thumbnail = photo_data.get('is_thumbnail', False)
+            listing_photos.append(ListingPhoto(listing_id=listing.id, url=photo_data['url'], is_thumbnail=is_thumbnail))
+            
+        # Si aucune miniature n'a été définie, la première devient la miniature
+        if thumbnail_count == 0 and listing_photos:
+            listing_photos[0].is_thumbnail = True
+            
+        listing.photos = listing_photos
+        
+        db.session.commit()
+        
+        return jsonify(listing.to_dict()), 200
+        
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"error": f"Bad request: {str(e)}"}), 400
+    
 #--------------------------------------------------------------------------------------------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5050))
