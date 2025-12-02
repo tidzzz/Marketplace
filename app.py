@@ -49,6 +49,8 @@ def authenticated_required(f):
     return decorated_function
 
 
+#-------------------------CATEGORIES--------------------------#
+
 @app.route('/api/categories', methods=['GET'])
 def list_categories():
     #Récupérer toutes les catégories de la base de données
@@ -90,7 +92,8 @@ def delete_category(category_id):
     if Category.query.filter_by(parent_id=category_id).first():
         return jsonify({"error": "Conflict: category has children or listings"}), 409
         
-    # Note: La vérification des listings devra être ajoutée ici quand le modèle Listing existera
+    if Listing.query.filter_by(category_id=category_id).first():
+        return jsonify({"error": "Conflict: category has children or listings"}), 409
     
     db.session.delete(category)
     db.session.commit()
@@ -98,6 +101,7 @@ def delete_category(category_id):
     return '', 204
 
 
+#-------------------------USERS--------------------------#
 
 @app.route('/api/users', methods=['POST'])
 def register_user():
@@ -145,6 +149,9 @@ def hello():
 def test():
     return render_template("layout.html.jinja2")
 
+
+#-------------------------ADDRESSES--------------------------#
+
 @app.route('/api/addresses',methods=['GET'])
 @authenticated_required
 def api_addresses_get(user):
@@ -164,7 +171,7 @@ def api_addresses_post(user):
     try:
         new_address = Address(
             line1=data['line1'],
-            line2=data.get('line2'),  # Optionnel
+            line2=data.get('line2'), 
             city=data['city'],
             postal_code=data['postal_code'],
             user_email=user.email
@@ -227,9 +234,72 @@ def api_addresses_delete(user, address_id):
 
 #-------------------------LISTINGS--------------------------#
 
+@app.route('/api/listings', methods=['POST'])
+@authenticated_required
+def create_listing(user):
+    data = request.get_json()
+    
+    # Validation des champs obligatoires
+    required_fields = ['title', 'description', 'price_cents', 'shipping_cents', 'category_id', 'photos']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"error": f"Bad request: missing {field}"}), 400
+            
+    photos_data = data['photos']
+    if not isinstance(photos_data, list) or len(photos_data) < 1:
+        return jsonify({"error": "Bad request: photos must be a non-empty list"}), 400
+    if len(photos_data) > 12:
+         return jsonify({"error": "Bad request: too many photos (max 12)"}), 400
+
+    # Validation de la catégorie
+    category = Category.query.get(data['category_id'])
+    if not category:
+        return jsonify({"error": "Bad request: invalid category_id"}), 400
+
+    try:
+        new_listing = Listing(
+            seller_email=user.email,
+            title=data['title'],
+            description=data['description'],
+            price_cents=data['price_cents'],
+            shipping_cents=data['shipping_cents'],
+            category_id=data['category_id']
+        )
+        
+        # Gestion des photos
+        thumbnail_count = sum(1 for p in photos_data if p.get('is_thumbnail', False))
+        if thumbnail_count > 1:
+             return jsonify({"error": "Bad request: at most one photo can be a thumbnail"}), 400
+        
+        listing_photos = []
+        for photo_data in photos_data:
+            if 'url' not in photo_data:
+                 return jsonify({"error": "Bad request: photo missing url"}), 400
+            
+            is_thumbnail = photo_data.get('is_thumbnail', False)
+            listing_photos.append(ListingPhoto(url=photo_data['url'], is_thumbnail=is_thumbnail))
+            
+        # Si aucune miniature n'a été définie, la première devient la miniature
+        if thumbnail_count == 0 and listing_photos:
+            listing_photos[0].is_thumbnail = True
+            
+        new_listing.photos = listing_photos
+        
+        db.session.add(new_listing)
+        db.session.commit()
+        
+        return jsonify(new_listing.to_dict()), 201
+        
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"error": f"Bad request: {str(e)}"}), 400
 
 
 
+
+
+
+#--------------------------------------------------------------------------------------------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5050))
     app.run(debug=True, port=port)
