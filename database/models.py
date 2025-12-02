@@ -154,3 +154,28 @@ class ListingPhoto(db.Model):
             "url": self.url,
             "is_thumbnail": self.is_thumbnail
         }
+
+class BuyerProtection(db.Model):
+    __tablename__ = 'buyer_protection'
+
+    id = db.Column(db.Integer, primary_key=True)
+    ratio_percent = db.Column(db.Float, nullable=False, default=0.0)
+    bias_cents = db.Column(db.Integer, nullable=False, default=0)
+
+    @validates('ratio_percent')
+    def validate_ratio_percent(self, key, value):
+        if value < 0:
+            raise ValueError("ratio_percent must be non-negative")
+        return value
+
+    @validates('bias_cents')
+    def validate_bias_cents(self, key, value):
+        if value < 0:
+            raise ValueError("bias_cents must be non-negative")
+        return value
+
+    def to_dict(self):
+        return {
+            "ratio_percent": self.ratio_percent,
+            "bias_cents": self.bias_cents
+        }

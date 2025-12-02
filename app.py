@@ -431,6 +431,39 @@ def delete_listing(user, listing_id):
     return '', 204 
 
 
+#-------------------------CONFIG--------------------------#
+
+@app.route('/api/config/buyer-protection', methods=['GET'])
+def get_buyer_protection():
+    config = BuyerProtection.query.first()
+    if not config:
+        return jsonify({"ratio_percent": 0.0, "bias_cents": 0}), 200
+    return jsonify(config.to_dict()), 200
+
+@app.route('/api/config/buyer-protection', methods=['PUT'])
+@admin_required
+def update_buyer_protection():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Bad request: missing data"}), 400
+        
+    if 'ratio_percent' not in data or 'bias_cents' not in data:
+        return jsonify({"error": "Bad request: missing required fields"}), 400
+        
+    config = BuyerProtection.query.first()
+    if not config:
+        config = BuyerProtection()
+        db.session.add(config)
+    
+    try:
+        config.ratio_percent = float(data['ratio_percent'])
+        config.bias_cents = int(data['bias_cents'])
+        db.session.commit()
+        return jsonify(config.to_dict()), 200
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"error": f"Bad request: {str(e)}"}), 400
+
 
 #--------------------------------------------------------------------------------------------
 if __name__ == '__main__':
