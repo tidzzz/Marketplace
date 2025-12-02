@@ -294,10 +294,29 @@ def create_listing(user):
         db.session.rollback()
         return jsonify({"error": f"Bad request: {str(e)}"}), 400
 
-
-
-
-
+@app.route('/api/listings/<int:listing_id>', methods=['GET'])
+def get_listing(listing_id):
+    listing = Listing.query.get(listing_id)
+    if not listing:
+        return jsonify({"error": "Not found"}), 404
+    
+    # Si l'annonce est active, elle est publique
+    if listing.status == 'active':
+        return jsonify(listing.to_dict()), 200
+        
+    # Si l'annonce n'est pas active (sold ou deleted), vérification des droits
+    user_email = request.headers.get('X-User-Email')
+    
+    # Admin peut tout voir
+    if user_email == 'admin@imt.test':
+        return jsonify(listing.to_dict()), 200
+        
+    # Le vendeur peut voir ses propres annonces (même sold ou deleted)
+    if user_email and user_email == listing.seller_email:
+        return jsonify(listing.to_dict()), 200
+        
+    # Sinon, on cache l'annonce (404 pour deleted, et aussi pour sold selon la spec stricte)
+    return jsonify({"error": "Not found"}), 404
 
 #--------------------------------------------------------------------------------------------
 if __name__ == '__main__':
