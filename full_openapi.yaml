@@ -77,7 +77,7 @@ info:
     Any deviation may cause tests to fail.
 
 servers:
-  - url: http://127.0.0.1:5000
+  - url: http://127.0.0.1:5050
     description: Local development server
 
 tags:

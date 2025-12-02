@@ -1,4 +1,5 @@
 from functools import wraps
+import os
 from flask import Flask, jsonify, request, render_template, make_response #, url_for, redirect
 from flask_cors import CORS
 from database.database import db, init_database
@@ -23,9 +24,9 @@ with app.test_request_context(): # (2) bloc exécuté à l'initialisation de Fla
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # On vérifie la présence et la valeur de l'en-tête X-User-Email
-        if request.headers.get('X-User-Email') != 'admin@imt.test':
-            # Si ce n'est pas l'admin, on renvoie une erreur 403 Forbidden
+        # Vérifie l'en-tête X-User-Email pour l'accès admin
+        user_email = request.headers.get('X-User-Email')
+        if not isinstance(user_email, str) or user_email.strip().lower() != 'admin@imt.test':
             return jsonify({"error": "Forbidden: admin only"}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -78,6 +79,24 @@ def create_category():
     
     return jsonify(new_category.to_dict()), 201
 
+
+@app.route('/api/categories/<int:category_id>', methods=['DELETE'])
+@admin_required
+def delete_category(category_id):
+    category = Category.query.get(category_id)
+    if not category:
+        return jsonify({"error": "Not found"}), 404
+    
+    # Vérifier s'il y a des sous-catégories
+    if Category.query.filter_by(parent_id=category_id).first():
+        return jsonify({"error": "Conflict: category has children or listings"}), 409
+        
+    # Note: La vérification des listings devra être ajoutée ici quand le modèle Listing existera
+    
+    db.session.delete(category)
+    db.session.commit()
+    
+    return '', 204
 
 
 
@@ -206,5 +225,7 @@ def api_addresses_delete(user, address_id):
     
     return '', 204  # No Content
 
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5050))
+    app.run(debug=True, port=port)
