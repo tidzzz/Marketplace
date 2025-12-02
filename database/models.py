@@ -14,6 +14,7 @@ class User(db.Model): # type: ignore
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
     credits_cents = db.Column(db.Integer, nullable=False, default=0)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
 
     
     def __repr__(self):

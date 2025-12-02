@@ -41,7 +41,7 @@ def authenticated_required(f):
         
         # Vérifier que l'utilisateur existe
         user = User.query.filter_by(email=user_email).first()
-        if not user:
+        if not user or not user.is_active:
             return jsonify({"error": "Unauthorized: invalid user"}), 401
         
         # Passer l'utilisateur à la fonction
@@ -139,6 +139,24 @@ def register_user():
         "credits_cents": new_user.credits_cents
     }
     return jsonify(response_data), 201
+
+@app.route('/api/users/<string:email>', methods=['DELETE'])
+@admin_required
+def delete_user(email):
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "Not found"}), 404
+        
+    user.is_active = False
+    
+    # Suppression de toutes ses annonces actives
+    listings = Listing.query.filter_by(seller_email=email, status='active').all()
+    for listing in listings:
+        listing.status = 'deleted'
+        
+    db.session.commit()
+    
+    return '', 204 
 
 
 @app.route('/')
@@ -392,6 +410,28 @@ def update_listing(user, listing_id):
         db.session.rollback()
         return jsonify({"error": f"Bad request: {str(e)}"}), 400
     
+@app.route('/api/listings/<int:listing_id>', methods=['DELETE'])
+@authenticated_required
+def delete_listing(user, listing_id):
+    listing = Listing.query.get(listing_id)
+    if not listing:
+        return jsonify({"error": "Not found"}), 404
+        
+    # Vérifier que l'utilisateur est le vendeur ou admin
+    if listing.seller_email != user.email and user.email != 'admin@imt.test':
+        return jsonify({"error": "Forbidden: not owner"}), 403
+        
+    # Si l'annonce est déjà vendue, le vendeur ne peut pas la supprimer
+    if listing.status == 'sold' and user.email != 'admin@imt.test':
+        return jsonify({"error": "Forbidden: cannot delete sold listing"}), 403
+        
+    listing.status = 'deleted'
+    db.session.commit()
+    
+    return '', 204 
+
+
+
 #--------------------------------------------------------------------------------------------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5050))
