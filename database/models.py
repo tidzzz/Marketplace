@@ -1,5 +1,6 @@
 from sqlalchemy.orm import validates
 from database.database import db
+from datetime import datetime, timezone
 
 # DÉFINITION DU MODÈLE USER
 #    Cette classe hérite de db.Model. SQLAlchemy sait alors
@@ -81,3 +82,74 @@ class Address(db.Model):
     
     def __repr__(self):
         return f'<Address {self.id}: {self.line1}, {self.city}>'
+
+class Listing(db.Model):
+    __tablename__ = 'listings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    seller_email = db.Column(db.String(120), db.ForeignKey('users.email'), nullable=False)
+    title = db.Column(db.String(140), nullable=False)
+    description = db.Column(db.String(5000), nullable=False)
+    price_cents = db.Column(db.Integer, nullable=False)
+    shipping_cents = db.Column(db.Integer, nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='active') # active, sold, deleted
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    photos = db.relationship('ListingPhoto', backref='listing', lazy=True, cascade="all, delete-orphan")
+
+    @validates('title')
+    def validate_title(self, key, value):
+        if not value or len(value.strip()) < 1:
+            raise ValueError("title must be at least 1 character")
+        if len(value) > 140:
+            raise ValueError("title must be at most 140 characters")
+        return value
+
+    @validates('description')
+    def validate_description(self, key, value):
+        if not value or len(value.strip()) < 1:
+            raise ValueError("description must be at least 1 character")
+        if len(value) > 5000:
+            raise ValueError("description must be at most 5000 characters")
+        return value
+    
+    @validates('price_cents')
+    def validate_price_cents(self, key, value):
+        if value < 0:
+            raise ValueError("price_cents must be non-negative")
+        return value
+
+    @validates('shipping_cents')
+    def validate_shipping_cents(self, key, value):
+        if value < 0:
+            raise ValueError("shipping_cents must be non-negative")
+        return value
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "seller_email": self.seller_email,
+            "title": self.title,
+            "description": self.description,
+            "price_cents": self.price_cents,
+            "shipping_cents": self.shipping_cents,
+            "category_id": self.category_id,
+            "status": self.status,
+            "photos": [photo.to_dict() for photo in self.photos],
+            "created_at": self.created_at.isoformat().replace('+00:00', 'Z')
+        }
+
+class ListingPhoto(db.Model):
+    __tablename__ = 'listing_photos'
+
+    id = db.Column(db.Integer, primary_key=True)
+    listing_id = db.Column(db.Integer, db.ForeignKey('listings.id'), nullable=False)
+    url = db.Column(db.String(500), nullable=False)
+    is_thumbnail = db.Column(db.Boolean, default=False)
+
+    def to_dict(self):
+        return {
+            "url": self.url,
+            "is_thumbnail": self.is_thumbnail
+        }

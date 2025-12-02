@@ -87,7 +87,6 @@ def delete_category(category_id):
     if not category:
         return jsonify({"error": "Not found"}), 404
     
-    # Vérifier s'il y a des sous-catégories
     if Category.query.filter_by(parent_id=category_id).first():
         return jsonify({"error": "Conflict: category has children or listings"}), 409
         
@@ -224,6 +223,11 @@ def api_addresses_delete(user, address_id):
     db.session.commit()
     
     return '', 204  # No Content
+
+
+#-------------------------LISTINGS--------------------------#
+
+
 
 
 if __name__ == '__main__':
