@@ -179,3 +179,67 @@ class BuyerProtection(db.Model):
             "ratio_percent": self.ratio_percent,
             "bias_cents": self.bias_cents
         }
+
+class Purchase(db.Model):
+    __tablename__ = 'purchases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    buyer_email = db.Column(db.String(120), db.ForeignKey('users.email'), nullable=False)
+    seller_email = db.Column(db.String(120), db.ForeignKey('users.email'), nullable=False)
+    listing_id = db.Column(db.Integer, db.ForeignKey('listings.id'), nullable=False)
+    
+    # Snapshot des prix
+    item_price_cents = db.Column(db.Integer, nullable=False)
+    shipping_cents = db.Column(db.Integer, nullable=False)
+    insurance_part_cents = db.Column(db.Integer, nullable=False)
+    total_cents = db.Column(db.Integer, nullable=False)
+    
+    # Snapshot de l'adresse
+    address_line1 = db.Column(db.String(200), nullable=False)
+    address_line2 = db.Column(db.String(200), nullable=True)
+    address_city = db.Column(db.String(100), nullable=False)
+    address_postal_code = db.Column(db.String(20), nullable=False)
+    
+    status = db.Column(db.String(20), nullable=False, default='paid') # paid, closed, refunded
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "buyer_email": self.buyer_email,
+            "seller_email": self.seller_email,
+            "listing_id": self.listing_id,
+            "item_price_cents": self.item_price_cents,
+            "shipping_cents": self.shipping_cents,
+            "insurance_part_cents": self.insurance_part_cents,
+            "total_cents": self.total_cents,
+            "status": self.status,
+            "created_at": self.created_at.isoformat().replace('+00:00', 'Z'),
+            "delivery_address": {
+                "line1": self.address_line1,
+                "line2": self.address_line2,
+                "city": self.address_city,
+                "postal_code": self.address_postal_code
+            }
+        }
+
+class CreditTxn(db.Model):
+    __tablename__ = 'credit_txns'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_email = db.Column(db.String(120), db.ForeignKey('users.email'), nullable=False)
+    type = db.Column(db.String(20), nullable=False) # topup, purchase, sale_payout, refund
+    amount_cents = db.Column(db.Integer, nullable=False)
+    balance_after_cents = db.Column(db.Integer, nullable=False)
+    related_purchase_id = db.Column(db.Integer, db.ForeignKey('purchases.id'), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "type": self.type,
+            "amount_cents": self.amount_cents,
+            "balance_after_cents": self.balance_after_cents,
+            "related_purchase_id": self.related_purchase_id,
+            "created_at": self.created_at.isoformat().replace('+00:00', 'Z')
+        }
