@@ -179,8 +179,8 @@ class BuyerProtection(db.Model):
             "ratio_percent": self.ratio_percent,
             "bias_cents": self.bias_cents
         }
-    
-    class CreditTxn(db.Model):
+        
+class CreditTxn(db.Model):
     __tablename__ = 'credit_txns'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -203,10 +203,53 @@ class BuyerProtection(db.Model):
     def to_dict(self):
         return {
             "id": self.id,
-            "user_email": self.user_email,
-            "txn_type": self.txn_type,
+            "type": self.txn_type,
             "amount_cents": self.amount_cents,
             "balance_after_cents": self.balance_after_cents,
             "related_purchase_id": self.related_purchase_id,
+            "created_at": self.created_at.isoformat().replace('+00:00', 'Z')
+        }
+
+class Purchase(db.Model):
+    __tablename__ = 'purchases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    listing_id = db.Column(db.Integer, db.ForeignKey('listings.id'), nullable=False)
+    buyer_email = db.Column(db.String(120), db.ForeignKey('users.email'), nullable=False)
+    seller_email = db.Column(db.String(120), db.ForeignKey('users.email'), nullable=False)
+    
+    item_price_cents = db.Column(db.Integer, nullable=False)
+    shipping_cents = db.Column(db.Integer, nullable=False)
+    insurance_part_cents = db.Column(db.Integer, nullable=False)
+    total_cents = db.Column(db.Integer, nullable=False)
+    
+    # Address snapshot
+    address_id = db.Column(db.Integer, nullable=True) # Original address ID
+    address_line1 = db.Column(db.String(200), nullable=False)
+    address_line2 = db.Column(db.String(200), nullable=True)
+    address_city = db.Column(db.String(100), nullable=False)
+    address_postal_code = db.Column(db.String(20), nullable=False)
+    
+    status = db.Column(db.String(20), nullable=False, default='paid') # paid, delivered, closed, refunded
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "listing_id": self.listing_id,
+            "buyer_email": self.buyer_email,
+            "seller_email": self.seller_email,
+            "item_price_cents": self.item_price_cents,
+            "shipping_cents": self.shipping_cents,
+            "insurance_part_cents": self.insurance_part_cents,
+            "total_cents": self.total_cents,
+            "address": {
+                "id": self.address_id if self.address_id else 0,
+                "line1": self.address_line1,
+                "line2": self.address_line2,
+                "city": self.address_city,
+                "postal_code": self.address_postal_code
+            },
+            "status": self.status,
             "created_at": self.created_at.isoformat().replace('+00:00', 'Z')
         }

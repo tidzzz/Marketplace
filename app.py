@@ -6,6 +6,8 @@ from flask_cors import CORS
 from database.database import db, init_database
 from database.models import *
 from werkzeug.security import generate_password_hash, check_password_hash
+from decimal import Decimal, ROUND_HALF_UP
+from sqlalchemy import or_
 
 app = Flask(__name__)
 CORS(app
@@ -441,7 +443,6 @@ def delete_listing(user, listing_id):
     
     return '', 204 
 
-#-------------------------CREDITS--------------------------#
 
 #-------------------------CONFIG--------------------------#
 
@@ -582,6 +583,47 @@ def browse_listings():
     paginated = results[start:end]
     
     return jsonify(paginated), 200
+
+#------------------------------------CREDITS-----------------------------------------#
+
+@app.route('/api/credits/topup', methods=['POST'])
+@authenticated_required
+def top_up_credits(user):
+    data = request.get_json()
+    if not data or 'amount_cents' not in data:
+        return jsonify({"error": "Bad request: missing amount_cents"}), 400
+    
+    amount_cents = data['amount_cents']
+    if not isinstance(amount_cents, int) or amount_cents <= 0:
+        return jsonify({"error": "Bad request: amount_cents must be a positive integer"}), 400
+    
+    # Update user credits
+    user.credits_cents += amount_cents
+    
+    # Create transaction record
+    txn = CreditTxn(
+        user_email=user.email,
+        txn_type='topup',
+        amount_cents=amount_cents,
+        balance_after_cents=user.credits_cents,
+        related_purchase_id=None
+    )
+    
+    db.session.add(txn)
+    db.session.commit()
+    
+    return jsonify({"balance_cents": user.credits_cents}), 201
+
+@app.route('/api/credits/ledger', methods=['GET'])
+@authenticated_required
+def get_credits_ledger(user):
+    # Return list of CreditTxn
+    txns = CreditTxn.query.filter_by(user_email=user.email).order_by(CreditTxn.created_at.desc()).all()
+    
+    return jsonify({
+        "balance_cents": user.credits_cents,
+        "txns": [t.to_dict() for t in txns]
+    }), 200
 
 #------------------------------------PURCHASES-----------------------------------------#
 
@@ -789,4 +831,3 @@ def get_photo(photo_id):
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5050))
     app.run(debug=True, port=port)
-
