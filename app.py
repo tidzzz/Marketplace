@@ -1,6 +1,7 @@
 from functools import wraps
 import os
-from flask import Flask, jsonify, request, render_template, make_response #, url_for, redirect
+import uuid
+from flask import Flask, jsonify, request, render_template, make_response, send_from_directory #, url_for, redirect
 from flask_cors import CORS
 from database.database import db, init_database
 from database.models import *
@@ -18,6 +19,16 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Recommandé pour désacti
 db.init_app(app) # (1) flask prend en compte la base de donnee
 with app.test_request_context(): # (2) bloc exécuté à l'initialisation de Flask
     init_database()
+
+
+# Configuration de l'upload
+UPLOAD_FOLDER = os.path.join(os.getcwd(), 'instance', 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 # 5 MiB
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({"error": "Payload too large: max 5 MiB"}), 413
 
 
 # DÉCORATEUR POUR PROTÉGER LES ROUTES ADMIN
@@ -465,8 +476,317 @@ def update_buyer_protection():
         db.session.rollback()
         return jsonify({"error": f"Bad request: {str(e)}"}), 400
 
+#------------------------------------BROWSE-----------------------------------#
+def calculate_insurance_and_total(price_cents, shipping_cents, config):
+    if not config:
+        ratio = Decimal(0)
+        bias = 0
+    else:
+        ratio = Decimal(str(config.ratio_percent))
+        bias = config.bias_cents
+    
+    price = Decimal(price_cents)
+    # percent_part = round_half_up(P * r / 100)
+    percent_part = (price * ratio / Decimal(100)).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    insurance_part_cents = int(percent_part) + bias
+    total_cents = price_cents + shipping_cents + insurance_part_cents
+    return insurance_part_cents, total_cents
+
+@app.route('/api/browse/listings', methods=['GET'])
+def browse_listings():
+    # Parameters
+    q = request.args.get('q')
+    category_id = request.args.get('category_id', type=int)
+    min_price = request.args.get('min_price_cents', type=int)
+    max_price = request.args.get('max_price_cents', type=int)
+    min_total = request.args.get('min_total_cents', type=int)
+    max_total = request.args.get('max_total_cents', type=int)
+    sort_by = request.args.get('sort')
+    order = request.args.get('order', default='asc')
+    page = request.args.get('page', default=1, type=int)
+    page_size = request.args.get('page_size', default=20, type=int)
+    if page_size > 50: page_size = 50
+    
+    # Config
+    config = BuyerProtection.query.first()
+    
+    # Base Query
+    query = Listing.query.filter_by(status='active')
+    
+    # Filter: q (Title OR Description)
+    if q:
+        search = f"%{q}%"
+        query = query.filter(or_(Listing.title.ilike(search), Listing.description.ilike(search)))
+        
+    # Filter: category_id (and descendants)
+    if category_id:
+        # Get all categories to build tree
+        all_cats = Category.query.all()
+        # Build adjacency list
+        children = {}
+        for c in all_cats:
+            if c.parent_id:
+                children.setdefault(c.parent_id, []).append(c.id)
+        
+        # BFS to find all descendants
+        descendants = {category_id}
+        queue = [category_id]
+        while queue:
+            curr = queue.pop(0)
+            if curr in children:
+                for child_id in children[curr]:
+                    descendants.add(child_id)
+                    queue.append(child_id)
+        
+        query = query.filter(Listing.category_id.in_(descendants))
+
+    # Filter: price
+    if min_price is not None:
+        query = query.filter(Listing.price_cents >= min_price)
+    if max_price is not None:
+        query = query.filter(Listing.price_cents <= max_price)
+        
+    # Fetch all candidates
+    listings = query.all()
+    
+    # Compute totals and enrich
+    results = []
+    for l in listings:
+        insurance, total = calculate_insurance_and_total(l.price_cents, l.shipping_cents, config)
+        
+        # Filter: total
+        if min_total is not None and total < min_total:
+            continue
+        if max_total is not None and total > max_total:
+            continue
+            
+        l_dict = l.to_dict()
+        l_dict['insurance_part_cents'] = insurance
+        l_dict['total_cents'] = total
+        results.append(l_dict)
+        
+    # Sort
+    reverse = (order == 'desc')
+    if sort_by == 'total':
+        results.sort(key=lambda x: (x['total_cents'], x['id']), reverse=reverse)
+    elif sort_by == 'price':
+        results.sort(key=lambda x: (x['price_cents'], x['id']), reverse=reverse)
+    else:
+        # Default sort (ties broken by id ASC)
+        # We'll sort by ID as a stable default.
+        results.sort(key=lambda x: x['id'], reverse=reverse)
+
+    # Pagination
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated = results[start:end]
+    
+    return jsonify(paginated), 200
+
+#------------------------------------PURCHASES-----------------------------------------#
+
+@app.route('/api/purchases', methods=['GET'])
+@authenticated_required
+def list_purchases(user):
+    role = request.args.get('role', default='buyer')
+    
+    if role == 'seller':
+        purchases = Purchase.query.filter_by(seller_email=user.email).all()
+    else:
+        purchases = Purchase.query.filter_by(buyer_email=user.email).all()
+        
+    return jsonify([p.to_dict() for p in purchases]), 200
+
+@app.route('/api/purchases', methods=['POST'])
+@authenticated_required
+def create_purchase(user):
+    data = request.get_json()
+    if not data or 'listing_id' not in data or 'address_id' not in data:
+        return jsonify({"error": "Bad request: missing fields"}), 400
+        
+    listing = Listing.query.get(data['listing_id'])
+    address = Address.query.get(data['address_id'])
+    
+    if not listing:
+        return jsonify({"error": "Not found: listing"}), 404
+    if not address:
+        return jsonify({"error": "Not found: address"}), 404
+        
+    # Preconditions
+    if listing.seller_email == user.email:
+        return jsonify({"error": "Forbidden: cannot buy own listing"}), 403
+    if listing.status != 'active':
+        return jsonify({"error": "Bad request: listing not active"}), 400
+    if address.user_email != user.email:
+        return jsonify({"error": "Forbidden: address not owned"}), 403
+        
+    # Calcul des montants
+    config = BuyerProtection.query.first()
+    insurance, total = calculate_insurance_and_total(listing.price_cents, listing.shipping_cents, config)
+    
+    if user.credits_cents < total:
+        return jsonify({"error": "Bad request: insufficient credits"}), 400
+        
+    try:
+        # 1. Débit acheteur
+        user.credits_cents -= total
+        buyer_txn = CreditTxn(
+            user_email=user.email,
+            type='purchase',
+            amount_cents=-total,
+            balance_after_cents=user.credits_cents
+        )
+        db.session.add(buyer_txn)
+        
+        # 2. Crédit vendeur
+        seller = User.query.filter_by(email=listing.seller_email).first()
+        payout = listing.price_cents + listing.shipping_cents
+        seller.credits_cents += payout
+        seller_txn = CreditTxn(
+            user_email=seller.email,
+            type='sale_payout',
+            amount_cents=payout,
+            balance_after_cents=seller.credits_cents
+        )
+        db.session.add(seller_txn)
+        
+        # 3. Création Purchase
+        purchase = Purchase(
+            buyer_email=user.email,
+            seller_email=listing.seller_email,
+            listing_id=listing.id,
+            item_price_cents=listing.price_cents,
+            shipping_cents=listing.shipping_cents,
+            insurance_part_cents=insurance,
+            total_cents=total,
+            address_line1=address.line1,
+            address_line2=address.line2,
+            address_city=address.city,
+            address_postal_code=address.postal_code
+        )
+        db.session.add(purchase)
+        
+        # 4. Mise à jour Listing
+        listing.status = 'sold'
+        
+        # Commit intermédiaire pour avoir l'ID du purchase
+        db.session.flush()
+        
+        # Lier les transactions au purchase
+        buyer_txn.related_purchase_id = purchase.id
+        seller_txn.related_purchase_id = purchase.id
+        
+        db.session.commit()
+        return jsonify(purchase.to_dict()), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
+
+@app.route('/api/purchases/<int:purchase_id>', methods=['GET'])
+@authenticated_required
+def get_purchase(user, purchase_id):
+    purchase = Purchase.query.get(purchase_id)
+    if not purchase:
+        return jsonify({"error": "Not found"}), 404
+        
+    # Vérification des droits (acheteur, vendeur ou admin)
+    if user.email != purchase.buyer_email and \
+       user.email != purchase.seller_email and \
+       user.email != 'admin@imt.test':
+        return jsonify({"error": "Forbidden"}), 403
+        
+    return jsonify(purchase.to_dict()), 200
+
+@app.route('/api/purchases/<int:purchase_id>/declare', methods=['POST'])
+@authenticated_required
+def declare_purchase(user, purchase_id):
+    purchase = Purchase.query.get(purchase_id)
+    if not purchase:
+        return jsonify({"error": "Not found"}), 404
+        
+    # Seul l'acheteur peut déclarer
+    if user.email != purchase.buyer_email:
+        return jsonify({"error": "Forbidden: buyer only"}), 403
+        
+    # Vérifier l'état
+    if purchase.status != 'paid': # 'delivered' n'est pas utilisé dans le flow simplifié mais mentionné dans la spec
+        return jsonify({"error": "Conflict: purchase is already terminal"}), 409
+        
+    data = request.get_json()
+    if not data or 'status' not in data:
+        return jsonify({"error": "Bad request: missing status"}), 400
+        
+    new_status = data['status']
+    if new_status not in ['OK', 'NOT_RECEIVED', 'NOT_AS_DESCRIBED']:
+        return jsonify({"error": "Bad request: invalid status"}), 400
+        
+    try:
+        if new_status == 'OK':
+            purchase.status = 'closed'
+        else:
+            # Remboursement (item + shipping, pas l'assurance)
+            refund_amount = purchase.item_price_cents + purchase.shipping_cents
+            user.credits_cents += refund_amount
+            
+            refund_txn = CreditTxn(
+                user_email=user.email,
+                type='refund',
+                amount_cents=refund_amount,
+                balance_after_cents=user.credits_cents,
+                related_purchase_id=purchase.id
+            )
+            db.session.add(refund_txn)
+            purchase.status = 'refunded'
+            
+        db.session.commit()
+        return '', 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
+    
+
+#-------------------------------------PHOTOS-----------------------------------------------#
+
+@app.route('/api/photos', methods=['POST'])
+@authenticated_required
+def upload_photo(user):
+    if 'file' not in request.files:
+        return jsonify({"error": "Bad request: missing form field 'file'"}), 400
+        
+    file = request.files['file']
+    
+    if not file or file.filename == '':
+        return jsonify({"error": "Bad request: no selected file"}), 400
+        
+    if file.mimetype not in ['image/jpeg', 'image/png', 'image/webp']:
+        return jsonify({"error": "Unsupported media type: only JPEG, PNG, WEBP"}), 415
+        
+    # Générer un nom de fichier unique
+    ext = 'jpg'
+    if file.mimetype == 'image/png': ext = 'png'
+    elif file.mimetype == 'image/webp': ext = 'webp'
+    
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    file.save(os.path.join(UPLOAD_FOLDER, filename))
+    
+    # Construire l'URL absolue
+    url = request.host_url.rstrip('/') + f"/api/photos/{filename}"
+    
+    response = jsonify({
+        "url": url,
+        "mime_type": file.mimetype
+    })
+    response.headers['Location'] = url
+    return response, 201
+
+@app.route('/api/photos/<path:photo_id>', methods=['GET'])
+def get_photo(photo_id):
+    return send_from_directory(UPLOAD_FOLDER, photo_id)
 
 #--------------------------------------------------------------------------------------------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5050))
     app.run(debug=True, port=port)
+
