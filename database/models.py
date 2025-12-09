@@ -179,3 +179,34 @@ class BuyerProtection(db.Model):
             "ratio_percent": self.ratio_percent,
             "bias_cents": self.bias_cents
         }
+    
+    class CreditTxn(db.Model):
+    __tablename__ = 'credit_txns'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_email = db.Column(db.String(120), db.ForeignKey('users.email'), nullable=False)
+    
+    # Type de transaction : 'topup' (rechargement), 'purchase' (achat), 'sale_payout' (vente), 'refund' (remboursement)
+    txn_type = db.Column(db.String(50), nullable=False)
+    
+    # Montant de la transaction (positif ou négatif selon la logique métier)
+    amount_cents = db.Column(db.Integer, nullable=False)
+    
+    # Solde de l'utilisateur APRÈS la transaction 
+    balance_after_cents = db.Column(db.Integer, nullable=False)
+    
+    # ID de l'achat lié (Optionnel, car un 'topup' n'est lié à aucun achat)
+    related_purchase_id = db.Column(db.Integer, nullable=True)
+    
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_email": self.user_email,
+            "txn_type": self.txn_type,
+            "amount_cents": self.amount_cents,
+            "balance_after_cents": self.balance_after_cents,
+            "related_purchase_id": self.related_purchase_id,
+            "created_at": self.created_at.isoformat().replace('+00:00', 'Z')
+        }
