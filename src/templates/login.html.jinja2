@@ -1,0 +1,129 @@
+{% extends "layout.html.jinja2" %}
+
+{% block title %}Login - IMT Marketplace{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow">
+            <div class="card-body">
+                <h3 class="card-title text-center mb-4">Welcome</h3>
+                
+                <ul class="nav nav-pills nav-fill mb-3" id="authTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="login-tab" data-bs-toggle="tab" data-bs-target="#login-pane" type="button" role="tab">Login</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="register-tab" data-bs-toggle="tab" data-bs-target="#register-pane" type="button" role="tab">Register</button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="authTabContent">
+                    <!-- Login Form -->
+                    <div class="tab-pane fade show active" id="login-pane" role="tabpanel">
+                        <form id="login-form">
+                            <div class="mb-3">
+                                <label for="login-email" class="form-label">Email address</label>
+                                <input type="email" class="form-control" id="login-email" required placeholder="user@example.com">
+                            </div>
+                            <div class="mb-3">
+                                <label for="login-password" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="login-password" required placeholder="******">
+                            </div>
+                            <div id="login-error" class="alert alert-danger d-none"></div>
+                            <button type="submit" class="btn btn-primary w-100">Sign In</button>
+                        </form>
+                    </div>
+
+                    <!-- Register Form -->
+                    <div class="tab-pane fade" id="register-pane" role="tabpanel">
+                        <form id="register-form">
+                            <div class="mb-3">
+                                <label for="register-email" class="form-label">Email address</label>
+                                <input type="email" class="form-control" id="register-email" required placeholder="newuser@example.com">
+                            </div>
+                            <div class="mb-3">
+                                <label for="register-password" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="register-password" required placeholder="******">
+                            </div>
+                            <div id="register-error" class="alert alert-danger d-none"></div>
+                            <button type="submit" class="btn btn-success w-100">Create Account</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Login Logic
+    document.getElementById('login-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value.trim();
+        const errorDiv = document.getElementById('login-error');
+        
+        if (!email || !password) return;
+
+        try {
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ email: email, password: password })
+            });
+
+            if (response.ok) {
+                // Success
+                localStorage.setItem('userEmail', email);
+                window.location.href = '/';
+            } else {
+                const data = await response.json();
+                errorDiv.textContent = data.error || "Login failed.";
+                errorDiv.classList.remove('d-none');
+            }
+        } catch (error) {
+            console.error(error);
+            errorDiv.textContent = "An error occurred. Please try again.";
+            errorDiv.classList.remove('d-none');
+        }
+    });
+
+    // Register Logic
+    document.getElementById('register-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const email = document.getElementById('register-email').value.trim();
+        const password = document.getElementById('register-password').value.trim();
+        const errorDiv = document.getElementById('register-error');
+
+        if (!email || !password) return;
+
+        try {
+            const response = await fetch('/api/users', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ email: email, password: password })
+            });
+
+            if (response.ok) {
+                // Success
+                localStorage.setItem('userEmail', email);
+                alert('Account created successfully!');
+                window.location.href = '/';
+            } else {
+                const data = await response.json();
+                errorDiv.textContent = data.error || "Registration failed.";
+                errorDiv.classList.remove('d-none');
+            }
+        } catch (error) {
+            console.error(error);
+            errorDiv.textContent = "An error occurred. Please try again.";
+            errorDiv.classList.remove('d-none');
+        }
+    });
+</script>
+{% endblock %}

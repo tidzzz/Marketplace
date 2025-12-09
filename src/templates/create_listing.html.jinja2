@@ -1,0 +1,206 @@
+{% extends "layout.html.jinja2" %}
+
+{% block title %}Sell Item - IMT Marketplace{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">Create New Listing</h4>
+                </div>
+                <div class="card-body">
+                    <form id="create-listing-form">
+                        <!-- Title -->
+                        <div class="mb-3">
+                            <label for="title" class="form-label">Title</label>
+                            <input type="text" class="form-control" id="title" required maxlength="140" placeholder="e.g. Nike Air Zoom, size 42">
+                        </div>
+
+                        <!-- Description -->
+                        <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <textarea class="form-control" id="description" rows="5" required maxlength="5000" placeholder="Describe your item..."></textarea>
+                        </div>
+
+                        <!-- Category -->
+                        <div class="mb-3">
+                            <label for="category" class="form-label">Category</label>
+                            <select class="form-select" id="category" required>
+                                <option value="" selected disabled>Select a category</option>
+                                <!-- Categories will be loaded here -->
+                            </select>
+                        </div>
+
+                        <!-- Prices -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="price" class="form-label">Price (€)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">€</span>
+                                    <input type="number" class="form-control" id="price" min="0" step="0.01" required placeholder="0.00">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="shipping" class="form-label">Shipping Cost (€)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">€</span>
+                                    <input type="number" class="form-control" id="shipping" min="0" step="0.01" required placeholder="0.00">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Photos -->
+                        <div class="mb-4">
+                            <label class="form-label">Photos</label>
+                            <div class="alert alert-info small">
+                                Note: For this version, please provide direct image URLs.
+                            </div>
+                            <div id="photo-inputs">
+                                <div class="input-group mb-2">
+                                    <span class="input-group-text">URL</span>
+                                    <input type="url" class="form-control photo-url" required placeholder="https://example.com/image.jpg">
+                                    <div class="input-group-text">
+                                        <input class="form-check-input mt-0" type="radio" name="thumbnail" checked title="Set as thumbnail">
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addPhotoField()">+ Add another photo</button>
+                        </div>
+
+                        <div id="form-error" class="alert alert-danger d-none"></div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg">Publish Listing</button>
+                            <a href="/" class="btn btn-light">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const email = localStorage.getItem('userEmail');
+        if (!email) {
+            window.location.href = '/login';
+            return;
+        }
+        fetchCategories();
+    });
+
+    async function fetchCategories() {
+        try {
+            const response = await fetch('/api/categories');
+            if (!response.ok) throw new Error('Failed to load categories');
+            const categories = await response.json();
+            
+            const select = document.getElementById('category');
+            categories.forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat.id;
+                option.textContent = cat.name; // Ideally we should show hierarchy
+                select.appendChild(option);
+            });
+        } catch (error) {
+            console.error(error);
+            alert('Error loading categories');
+        }
+    }
+
+    function addPhotoField() {
+        const container = document.getElementById('photo-inputs');
+        if (container.children.length >= 12) {
+            alert('Maximum 12 photos allowed');
+            return;
+        }
+
+        const div = document.createElement('div');
+        div.className = 'input-group mb-2';
+        div.innerHTML = `
+            <span class="input-group-text">URL</span>
+            <input type="url" class="form-control photo-url" required placeholder="https://example.com/image.jpg">
+            <div class="input-group-text">
+                <input class="form-check-input mt-0" type="radio" name="thumbnail" title="Set as thumbnail">
+            </div>
+            <button class="btn btn-outline-danger" type="button" onclick="this.parentElement.remove()">X</button>
+        `;
+        container.appendChild(div);
+    }
+
+    document.getElementById('create-listing-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const email = localStorage.getItem('userEmail');
+        const btn = this.querySelector('button[type="submit"]');
+        const errorDiv = document.getElementById('form-error');
+
+        // Gather Data
+        const title = document.getElementById('title').value;
+        const description = document.getElementById('description').value;
+        const categoryId = parseInt(document.getElementById('category').value);
+        const priceCents = Math.round(parseFloat(document.getElementById('price').value) * 100);
+        const shippingCents = Math.round(parseFloat(document.getElementById('shipping').value) * 100);
+
+        // Gather Photos
+        const photoInputs = document.querySelectorAll('.photo-url');
+        const radioInputs = document.getElementsByName('thumbnail');
+        const photos = [];
+        
+        photoInputs.forEach((input, index) => {
+            if (input.value.trim()) {
+                photos.push({
+                    url: input.value.trim(),
+                    is_thumbnail: radioInputs[index].checked
+                });
+            }
+        });
+
+        if (photos.length === 0) {
+            errorDiv.textContent = "At least one photo URL is required.";
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+
+        const payload = {
+            title,
+            description,
+            category_id: categoryId,
+            price_cents: priceCents,
+            shipping_cents: shippingCents,
+            photos
+        };
+
+        btn.disabled = true;
+        btn.textContent = 'Publishing...';
+        errorDiv.classList.add('d-none');
+
+        try {
+            const response = await fetch('/api/listings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-Email': email
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                const newListing = await response.json();
+                alert('Listing published successfully!');
+                window.location.href = `/listings/${newListing.id}`;
+            } else {
+                const data = await response.json();
+                throw new Error(data.error || 'Failed to create listing');
+            }
+        } catch (error) {
+            errorDiv.textContent = error.message;
+            errorDiv.classList.remove('d-none');
+            btn.disabled = false;
+            btn.textContent = 'Publish Listing';
+        }
+    });
+</script>
+{% endblock %}

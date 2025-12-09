@@ -5,21 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1,shrink-to-fit=no">
     <!-- Bootstrap CSS CDN-->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">    
-    <title>{% block title %}My Website{% endblock %}</title>
+    <title>{% block title %}IMT Marketplace{% endblock %}</title>
 
 </head>
 <body>
     <!-- Header -->
     <header class="bg-primary text-white py-3 mb-4">
         <div class="container">
-            <h1 class="mb-0">My Website</h1>
+            <h1 class="mb-0">IMT Marketplace</h1>
         </div>
     </header>
 
      <!-- NavBar -->
      <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">Navbar</a>
+        <div class="container">
+            <a class="navbar-brand" href="/">IMT Marketplace</a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarColor01" aria-controls="navbarColor01" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
@@ -27,22 +27,16 @@
             <div class="collapse navbar-collapse" id="navbarColor01">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                     <li class="nav-item">
-                        <a class="nav-link active" aria-current="page" href="#">Home</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#">Features</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#">Pricing</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#">About</a>
+                        <a class="nav-link" href="/">Browse</a>
                     </li>
                 </ul>
-                <form class="d-flex">
-                    <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search" />
-                        <button class="btn btn-outline-success" type="submit">Search</button>
-                </form>
+                
+                <ul class="navbar-nav ms-auto mb-2 mb-lg-0" id="auth-nav">
+                    <!-- Will be populated by JS -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="/login">Login / Register</a>
+                    </li>
+                </ul>
             </div>
         </div>
     </nav>
@@ -58,10 +52,41 @@
     <!-- Footer -->
     <footer class="bg-light text-center py-3 mt-auto">
         <div class="container">
-            <span class="text-muted">&copy; {{ current_year | default(2024) }} My Website. All rights reserved.</span>
+            <span class="text-muted">&copy; 2025 IMT Marketplace. All rights reserved.</span>
         </div>
     </footer>
 
     <!-- Fichiers Javascript nécessaires pour certains composants Bootstrap -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script></body>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    
+    <script>
+        // Global Auth Logic
+        document.addEventListener('DOMContentLoaded', function() {
+            const userEmail = localStorage.getItem('userEmail');
+            const authNav = document.getElementById('auth-nav');
+
+            if (userEmail) {
+                authNav.innerHTML = `
+                    <li class="nav-item">
+                        <a class="nav-link" href="/create-listing">+ Sell Item</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/credits">My Credits</a>
+                    </li>
+                    <li class="nav-item">
+                        <span class="nav-link text-light">Hello, ${userEmail}</span>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="logout()">Logout</a>
+                    </li>
+                `;
+            }
+        });
+
+        function logout() {
+            localStorage.removeItem('userEmail');
+            window.location.href = '/';
+        }
+    </script>
+</body>
 </html>

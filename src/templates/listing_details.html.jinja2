@@ -1,0 +1,150 @@
+{% extends "layout.html.jinja2" %}
+
+{% block title %}Listing Details - IMT Marketplace{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div id="loading-spinner" class="text-center">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <div id="error-message" class="alert alert-danger d-none"></div>
+
+    <div id="listing-content" class="row d-none">
+        <!-- Left Column: Images -->
+        <div class="col-md-6 mb-4">
+            <div id="main-image-container" class="mb-3">
+                <img id="main-image" src="" class="img-fluid rounded shadow-sm w-100" style="max-height: 500px; object-fit: contain; background-color: #f8f9fa;" alt="Product Image">
+            </div>
+            <div id="thumbnails-container" class="d-flex gap-2 overflow-auto">
+                <!-- Thumbnails will be injected here -->
+            </div>
+        </div>
+
+        <!-- Right Column: Details -->
+        <div class="col-md-6">
+            <h1 id="listing-title" class="display-5 fw-bold mb-3"></h1>
+            
+            <div class="mb-3">
+                <span class="badge bg-secondary" id="listing-category">Category ID: <span id="category-val"></span></span>
+                <span class="badge bg-success" id="listing-status"></span>
+            </div>
+
+            <div class="card bg-light mb-4">
+                <div class="card-body">
+                    <h2 class="card-title text-primary mb-0" id="listing-price"></h2>
+                    <p class="text-muted mb-0">+ <span id="shipping-price"></span> shipping</p>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <h5>Description</h5>
+                <p id="listing-description" class="lead fs-6" style="white-space: pre-wrap;"></p>
+            </div>
+
+            <div class="d-grid gap-2">
+                <button id="buy-btn" class="btn btn-primary btn-lg" disabled>Buy Now</button>
+                <p class="text-muted small text-center mt-2">
+                    Seller: <span id="seller-email"></span><br>
+                    Posted on: <span id="created-at"></span>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const listingId = {{ listing_id }};
+
+    document.addEventListener('DOMContentLoaded', function() {
+        fetchListingDetails();
+    });
+
+    function fetchListingDetails() {
+        fetch(`/api/listings/${listingId}`)
+            .then(response => {
+                if (response.status === 404) {
+                    throw new Error('Listing not found');
+                }
+                if (!response.ok) {
+                    throw new Error('Error fetching listing');
+                }
+                return response.json();
+            })
+            .then(listing => {
+                renderListing(listing);
+            })
+            .catch(error => {
+                showError(error.message);
+            });
+    }
+
+    function renderListing(listing) {
+        document.getElementById('loading-spinner').classList.add('d-none');
+        document.getElementById('listing-content').classList.remove('d-none');
+
+        // Text details
+        document.getElementById('listing-title').textContent = listing.title;
+        document.getElementById('category-val').textContent = listing.category_id;
+        document.getElementById('listing-status').textContent = listing.status;
+        document.getElementById('listing-description').textContent = listing.description;
+        document.getElementById('seller-email').textContent = listing.seller_email;
+        document.getElementById('created-at').textContent = new Date(listing.created_at).toLocaleDateString();
+
+        // Prices
+        const price = formatMoney(listing.price_cents);
+        const shipping = formatMoney(listing.shipping_cents);
+        document.getElementById('listing-price').textContent = price;
+        document.getElementById('shipping-price').textContent = shipping;
+
+        // Images
+        if (listing.photos && listing.photos.length > 0) {
+            // Find thumbnail or use first image
+            const mainPhoto = listing.photos.find(p => p.is_thumbnail) || listing.photos[0];
+            document.getElementById('main-image').src = mainPhoto.url;
+
+            // Thumbnails
+            const thumbsContainer = document.getElementById('thumbnails-container');
+            listing.photos.forEach(photo => {
+                const img = document.createElement('img');
+                img.src = photo.url;
+                img.className = 'img-thumbnail';
+                img.style.width = '80px';
+                img.style.height = '80px';
+                img.style.objectFit = 'cover';
+                img.style.cursor = 'pointer';
+                img.onclick = () => {
+                    document.getElementById('main-image').src = photo.url;
+                };
+                thumbsContainer.appendChild(img);
+            });
+        }
+
+        // Buy Button logic
+        const buyBtn = document.getElementById('buy-btn');
+        if (listing.status === 'active') {
+            buyBtn.disabled = false;
+            buyBtn.onclick = () => {
+                // Redirect to purchase page (to be implemented)
+                window.location.href = `/purchase/${listing.id}`;
+            };
+        } else {
+            buyBtn.textContent = listing.status === 'sold' ? 'Sold Out' : 'Unavailable';
+            buyBtn.classList.replace('btn-primary', 'btn-secondary');
+        }
+    }
+
+    function showError(message) {
+        document.getElementById('loading-spinner').classList.add('d-none');
+        const errorDiv = document.getElementById('error-message');
+        errorDiv.textContent = message;
+        errorDiv.classList.remove('d-none');
+    }
+
+    function formatMoney(cents) {
+        return (cents / 100).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,357 @@
+{% extends "layout.html.jinja2" %}
+
+{% block title %}Checkout - IMT Marketplace{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">Checkout</h2>
+
+    <div id="loading-spinner" class="text-center">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <div id="checkout-content" class="row d-none">
+        <!-- Left Column: Order Summary -->
+        <div class="col-md-7">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Item Details</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex align-items-center mb-3">
+                        <img id="item-image" src="" class="rounded me-3" style="width: 80px; height: 80px; object-fit: cover;" alt="Item">
+                        <div>
+                            <h5 id="item-title" class="mb-1"></h5>
+                            <p class="text-muted mb-0" id="item-seller"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Shipping Address</h5>
+                    <button class="btn btn-sm btn-outline-primary" onclick="toggleAddressForm()">+ New Address</button>
+                </div>
+                <div class="card-body">
+                    <!-- Address Selection -->
+                    <div id="address-list" class="list-group mb-3">
+                        <!-- Addresses will be injected here -->
+                    </div>
+                    <div id="no-address-msg" class="alert alert-warning d-none">
+                        You don't have any saved addresses. Please add one.
+                    </div>
+
+                    <!-- New Address Form (Hidden by default) -->
+                    <div id="new-address-form" class="card card-body bg-light d-none">
+                        <h6>Add New Address</h6>
+                        <form id="add-address-form">
+                            <div class="mb-2">
+                                <input type="text" class="form-control" id="addr-line1" placeholder="Address Line 1" required>
+                            </div>
+                            <div class="mb-2">
+                                <input type="text" class="form-control" id="addr-line2" placeholder="Address Line 2 (Optional)">
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col">
+                                    <input type="text" class="form-control" id="addr-city" placeholder="City" required>
+                                </div>
+                                <div class="col">
+                                    <input type="text" class="form-control" id="addr-zip" placeholder="Postal Code" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm">Save Address</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAddressForm()">Cancel</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Payment & Totals -->
+        <div class="col-md-5">
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">Order Summary</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Item Price</span>
+                        <span id="summary-price"></span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Shipping</span>
+                        <span id="summary-shipping"></span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-3">
+                        <span>Buyer Protection <i class="bi bi-info-circle" title="Insurance"></i></span>
+                        <span id="summary-insurance"></span>
+                    </div>
+                    <hr>
+                    <div class="d-flex justify-content-between mb-4">
+                        <strong>Total</strong>
+                        <strong id="summary-total" class="fs-5"></strong>
+                    </div>
+
+                    <div class="alert alert-info">
+                        Your Balance: <strong id="user-balance"></strong>
+                    </div>
+                    
+                    <div id="insufficient-funds" class="alert alert-danger d-none">
+                        Insufficient funds. <a href="/credits" class="alert-link">Top up here</a>.
+                    </div>
+
+                    <div id="checkout-error" class="alert alert-danger d-none"></div>
+
+                    <button id="confirm-btn" class="btn btn-success w-100 btn-lg" onclick="confirmPurchase()" disabled>
+                        Confirm Purchase
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const listingId = {{ listing_id }};
+    let currentListing = null;
+    let buyerConfig = null;
+    let selectedAddressId = null;
+    let userBalance = 0;
+    let totalCost = 0;
+
+    document.addEventListener('DOMContentLoaded', async function() {
+        const email = localStorage.getItem('userEmail');
+        if (!email) {
+            window.location.href = '/login';
+            return;
+        }
+
+        try {
+            await Promise.all([
+                fetchListing(),
+                fetchConfig(),
+                fetchAddresses(),
+                fetchBalance()
+            ]);
+            calculateTotal();
+            renderPage();
+        } catch (error) {
+            console.error(error);
+            alert('Error loading checkout data. ' + error.message);
+        }
+    });
+
+    async function fetchListing() {
+        const res = await fetch(`/api/listings/${listingId}`);
+        if (!res.ok) throw new Error('Failed to fetch listing');
+        currentListing = await res.json();
+    }
+
+    async function fetchConfig() {
+        const res = await fetch('/api/config/buyer-protection');
+        if (!res.ok) throw new Error('Failed to fetch config');
+        buyerConfig = await res.json();
+    }
+
+    async function fetchAddresses() {
+        const email = localStorage.getItem('userEmail');
+        const res = await fetch('/api/addresses', {
+            headers: { 'X-User-Email': email }
+        });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        if (!res.ok) throw new Error('Failed to fetch addresses');
+        const addresses = await res.json();
+        renderAddresses(addresses);
+    }
+
+    async function fetchBalance() {
+        const email = localStorage.getItem('userEmail');
+        const res = await fetch('/api/credits/ledger', {
+            headers: { 'X-User-Email': email }
+        });
+        if (!res.ok) throw new Error('Failed to fetch balance');
+        const data = await res.json();
+        userBalance = data.balance_cents;
+    }
+
+    function renderAddresses(addresses) {
+        const list = document.getElementById('address-list');
+        list.innerHTML = '';
+        
+        if (addresses.length === 0) {
+            document.getElementById('no-address-msg').classList.remove('d-none');
+            return;
+        } else {
+            document.getElementById('no-address-msg').classList.add('d-none');
+        }
+
+        addresses.forEach((addr, index) => {
+            const item = document.createElement('button');
+            item.className = 'list-group-item list-group-item-action';
+            item.innerHTML = `
+                <div class="d-flex w-100 justify-content-between">
+                    <h6 class="mb-1">${addr.line1}</h6>
+                </div>
+                <p class="mb-1 small">${addr.city}, ${addr.postal_code}</p>
+            `;
+            item.onclick = () => selectAddress(addr.id, item);
+            
+            // Auto-select first address
+            if (index === 0) selectAddress(addr.id, item);
+            
+            list.appendChild(item);
+        });
+    }
+
+    function selectAddress(id, element) {
+        selectedAddressId = id;
+        // Update UI
+        const items = document.getElementById('address-list').children;
+        for (let item of items) {
+            item.classList.remove('active');
+        }
+        element.classList.add('active');
+        checkCanBuy();
+    }
+
+    function calculateTotal() {
+        if (!currentListing || !buyerConfig) return;
+
+        const price = currentListing.price_cents;
+        const shipping = currentListing.shipping_cents;
+        
+        // Formula: percent_part = round_half_up(P * r / 100)
+        // insurance = percent_part + bias
+        const ratio = buyerConfig.ratio_percent;
+        const bias = buyerConfig.bias_cents;
+        
+        const percentPart = Math.round(price * ratio / 100); // JS Math.round is round half up for positive numbers usually, but let's be careful.
+        // Actually JS Math.round(2.5) is 3. Math.round(2.49) is 2. This matches round_half_up for positive.
+        
+        const insurance = percentPart + bias;
+        totalCost = price + shipping + insurance;
+
+        // Render totals
+        document.getElementById('summary-price').textContent = formatMoney(price);
+        document.getElementById('summary-shipping').textContent = formatMoney(shipping);
+        document.getElementById('summary-insurance').textContent = formatMoney(insurance);
+        document.getElementById('summary-total').textContent = formatMoney(totalCost);
+        document.getElementById('user-balance').textContent = formatMoney(userBalance);
+
+        checkCanBuy();
+    }
+
+    function renderPage() {
+        document.getElementById('loading-spinner').classList.add('d-none');
+        document.getElementById('checkout-content').classList.remove('d-none');
+
+        document.getElementById('item-title').textContent = currentListing.title;
+        document.getElementById('item-seller').textContent = 'Seller: ' + currentListing.seller_email;
+        
+        if (currentListing.photos && currentListing.photos.length > 0) {
+            const thumb = currentListing.photos.find(p => p.is_thumbnail) || currentListing.photos[0];
+            document.getElementById('item-image').src = thumb.url;
+        }
+    }
+
+    function checkCanBuy() {
+        const btn = document.getElementById('confirm-btn');
+        const fundMsg = document.getElementById('insufficient-funds');
+        
+        if (userBalance < totalCost) {
+            fundMsg.classList.remove('d-none');
+            btn.disabled = true;
+        } else {
+            fundMsg.classList.add('d-none');
+            if (selectedAddressId) {
+                btn.disabled = false;
+            } else {
+                btn.disabled = true;
+            }
+        }
+    }
+
+    function toggleAddressForm() {
+        const form = document.getElementById('new-address-form');
+        form.classList.toggle('d-none');
+    }
+
+    document.getElementById('add-address-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const email = localStorage.getItem('userEmail');
+        
+        const data = {
+            line1: document.getElementById('addr-line1').value,
+            line2: document.getElementById('addr-line2').value || null,
+            city: document.getElementById('addr-city').value,
+            postal_code: document.getElementById('addr-zip').value
+        };
+
+        try {
+            const res = await fetch('/api/addresses', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-Email': email
+                },
+                body: JSON.stringify(data)
+            });
+            
+            if (res.ok) {
+                toggleAddressForm();
+                fetchAddresses(); // Refresh list
+                this.reset();
+            } else {
+                alert('Failed to add address');
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    });
+
+    async function confirmPurchase() {
+        const email = localStorage.getItem('userEmail');
+        const btn = document.getElementById('confirm-btn');
+        const errorDiv = document.getElementById('checkout-error');
+        
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
+        errorDiv.classList.add('d-none');
+
+        try {
+            const res = await fetch('/api/purchases', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-Email': email
+                },
+                body: JSON.stringify({
+                    listing_id: listingId,
+                    address_id: selectedAddressId
+                })
+            });
+
+            if (res.ok) {
+                const purchase = await res.json();
+                alert('Purchase successful!');
+                window.location.href = '/'; // Or to purchase details
+            } else {
+                const data = await res.json();
+                throw new Error(data.error || 'Purchase failed');
+            }
+        } catch (err) {
+            errorDiv.textContent = err.message;
+            errorDiv.classList.remove('d-none');
+            btn.disabled = false;
+            btn.textContent = 'Confirm Purchase';
+        }
+    }
+
+    function formatMoney(cents) {
+        return (cents / 100).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+    }
+</script>
+{% endblock %}

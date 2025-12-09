@@ -9,7 +9,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import or_
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='src/templates')
 CORS(app
      #,origins=[]
      )
@@ -153,6 +153,18 @@ def register_user():
     }
     return jsonify(response_data), 201
 
+@app.route('/api/login', methods=['POST'])
+def login_user():
+    data = request.get_json()
+    if not data or 'email' not in data or 'password' not in data:
+        return jsonify({"error": "Bad request: missing email or password"}), 400
+        
+    user = User.query.filter_by(email=data['email']).first()
+    if not user or not check_password_hash(user.password_hash, data['password']):
+        return jsonify({"error": "Unauthorized: invalid credentials"}), 401
+        
+    return jsonify({"message": "Login successful", "email": user.email}), 200
+
 @app.route('/api/users/<string:email>', methods=['DELETE'])
 @admin_required
 def delete_user(email):
@@ -173,8 +185,28 @@ def delete_user(email):
 
 
 @app.route('/')
-def hello():
-    return "Le serveur est en marche !"
+def index():
+    return render_template("index.html.jinja2")
+
+@app.route('/listings/<int:listing_id>')
+def listing_details(listing_id):
+    return render_template("listing_details.html.jinja2", listing_id=listing_id)
+
+@app.route('/login')
+def login():
+    return render_template("login.html.jinja2")
+
+@app.route('/purchase/<int:listing_id>')
+def purchase_page(listing_id):
+    return render_template("purchase.html.jinja2", listing_id=listing_id)
+
+@app.route('/credits')
+def credits_page():
+    return render_template("credits.html.jinja2")
+
+@app.route('/create-listing')
+def create_listing_page():
+    return render_template("create_listing.html.jinja2")
 
 @app.route('/test',methods=['GET'])
 def test():
@@ -582,7 +614,12 @@ def browse_listings():
     end = start + page_size
     paginated = results[start:end]
     
-    return jsonify(paginated), 200
+    return jsonify({
+        "items": paginated,
+        "total_items": len(results),
+        "page": page,
+        "page_size": page_size
+    }), 200
 
 #------------------------------------CREDITS-----------------------------------------#
 
@@ -674,7 +711,7 @@ def create_purchase(user):
         user.credits_cents -= total
         buyer_txn = CreditTxn(
             user_email=user.email,
-            type='purchase',
+            txn_type='purchase',
             amount_cents=-total,
             balance_after_cents=user.credits_cents
         )
@@ -686,7 +723,7 @@ def create_purchase(user):
         seller.credits_cents += payout
         seller_txn = CreditTxn(
             user_email=seller.email,
-            type='sale_payout',
+            txn_type='sale_payout',
             amount_cents=payout,
             balance_after_cents=seller.credits_cents
         )
@@ -773,7 +810,7 @@ def declare_purchase(user, purchase_id):
             
             refund_txn = CreditTxn(
                 user_email=user.email,
-                type='refund',
+                txn_type='refund',
                 amount_cents=refund_amount,
                 balance_after_cents=user.credits_cents,
                 related_purchase_id=purchase.id

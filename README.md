@@ -1,123 +1,117 @@
-# API Abilan Tidiane
+# API Abilan Tidiane - IMT Second-Hand Marketplace
 
-API minimaliste d’un marketplace seconde-main construite avec Flask + SQLAlchemy et une base SQLite. Elle expose des endpoints pour gérer les utilisateurs, catégories et adresses, avec un schéma OpenAPI fourni.
+Ce projet est une application web de type "marketplace" de seconde main, développée avec Flask. Elle fournit une API REST pour la gestion des utilisateurs, des catégories, des annonces et des transactions, ainsi qu'une interface utilisateur basique rendue avec des templates Jinja2.
 
-## Stack
+## Stack Technique
 
-- Python (Flask)
-- SQLAlchemy (ORM) + SQLite
-- Flask-CORS
-- OpenAPI 3.1 (`full_openapi.yaml`)
+- **Langage** : Python 3.8+
+- **Framework Web** : Flask
+- **ORM** : SQLAlchemy
+- **Base de données** : SQLite
+- **API Spec** : OpenAPI 3.1 (`full_openapi.yaml`)
 
-## Structure du projet
+## Structure du Projet
 
 ```text
-app.py                    # Entrée de l'application Flask (app:app)
-full_openapi.yaml         # Spécification OpenAPI de référence (Tier A)
+app.py                    # Point d'entrée de l'application Flask
+full_openapi.yaml         # Spécification OpenAPI
 requirements.txt          # Dépendances Python
+start.sh                  # Script de démarrage rapide
+tests/                    # Dossier des tests
+  test_scenario.py        # Scénarios de test reproductibles
 database/
-  database.py             # Initialisation SQLAlchemy
-  models.py               # Modèles User, Category, Address
-  database.db             # Fichier SQLite (créé au premier run)
+  database.py             # Initialisation DB
+  models.py               # Modèles de données
+  database.db             # Fichier SQLite (généré)
 src/
-  templates/
-    layout.html.jinja2    # Template de test /test
+  templates/              # Templates Jinja2
+instance/
+  uploads/                # Stockage des fichiers uploadés
 ```
 
-## Lancer en local (dev)
+## Installation et Démarrage
 
+### Option 1 : Démarrage Rapide (macOS/Linux)
 
-1. Créez un environnement virtuel et installez les dépendances
+Un script `start.sh` est fourni pour automatiser la création de l'environnement virtuel, l'installation des dépendances et le lancement de l'application.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+chmod +x start.sh
+./start.sh
 ```
 
-1. Démarrez l’API
+### Option 2 : Installation Manuelle
 
-```bash
-python app.py
-```
+1. **Créer un environnement virtuel** :
 
-Par défaut, l’API écoute sur <http://127.0.0.1:5000>
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate  # macOS/Linux
+    # ou
+    venv\Scripts\activate     # Windows
+    ```
 
-Notes:
+2. **Installer les dépendances** :
 
-- La base SQLite est créée automatiquement (tables) au premier lancement.
-- Le fichier cible attendu est `database/database.db`.
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-## Authentification de test (en-tête)
+3. **Lancer l'application** :
 
-Pour les endpoints qui requièrent un utilisateur, utilisez l’en-tête HTTP suivant:
+    ```bash
+    python app.py
+    ```
 
-```text
-X-User-Email: <email-utilisateur>
-```
+L'application sera accessible à l'adresse : `http://127.0.0.1:5000`.
 
-- L’admin de test est `admin@imt.test` (à utiliser pour les routes admin uniquement).
-- Pour créer un utilisateur standard: `POST /api/users` avec `{ "email": "...", "password": "..." }`.
+## Utilisation de l'API
 
-## Endpoints principaux (implémentés jusqu'à maintenant)
+L'API suit la spécification définie dans `full_openapi.yaml`.
 
-- `GET /api/categories` — liste toutes les catégories
-- `POST /api/categories` — crée une catégorie (réservé admin: `X-User-Email: admin@imt.test`)
-- `POST /api/users` — enregistre un utilisateur (hash du mot de passe)
-- `GET /api/addresses` — liste les adresses de l’utilisateur connecté (en-tête requis)
-- `POST /api/addresses` — crée une adresse pour l’utilisateur connecté
-- `PUT /api/addresses/{id}` — modifie une adresse de l’utilisateur connecté
-- `DELETE /api/addresses/{id}` — supprime une adresse de l’utilisateur connecté
+### Authentification
 
-Autres routes:
+L'authentification pour les tests et l'API se fait via le header HTTP `X-User-Email`.
 
-- `/` — ping simple
-- `/test` — rend le template `layout.html.jinja2`
+- **Admin** : `admin@imt.test` (pour les opérations privilégiées comme la création de catégories)
+- **Utilisateur Standard** : Tout email enregistré via `POST /api/users`.
 
-Pour une description complète de l’API cible (obligations côté tests), se référer à `full_openapi.yaml`.
+### Exemples (cURL)
 
-## Exemples rapides (curl)
-
-Créer un utilisateur:
-
-```bash
-curl -X POST http://127.0.0.1:5000/api/users \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"secret"}'
-```
-
-Lister ses adresses (avec authentification par en-tête):
-
-```bash
-curl -X GET http://127.0.0.1:5000/api/addresses \
-  -H 'X-User-Email: alice@example.com'
-```
-
-Créer une catégorie (admin):
+**Créer une catégorie (Admin uniquement)** :
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/categories \
   -H 'Content-Type: application/json' \
   -H 'X-User-Email: admin@imt.test' \
-  -d '{"name":"Mode","parent_id":null}'
+  -d '{"name":"Informatique"}'
 ```
 
-## Base de données
-
-- Moteur: SQLite (fichier dans `database/database.db`).
-- Initialisation: automatique au démarrage via `init_database()`.
-- Réinitialiser (attention, destructive):
+**Lister les catégories** :
 
 ```bash
-rm -f database/database.db
-python app.py
+curl -X GET http://127.0.0.1:5000/api/categories
 ```
 
+## Tests Reproductibles
 
-## Dépannage
+Des scénarios de test automatisés sont disponibles dans le dossier `tests/`. Ces tests utilisent une base de données en mémoire pour ne pas affecter vos données locales.
 
-- 404 ou 401 sur des routes protégées: vérifiez l’en-tête `X-User-Email`.
-- 403 sur création de catégories: l’en-tête doit être exactement `admin@imt.test`.
-- Base non créée: supprimez `database/database.db` puis relancez; vérifiez que vous lancez depuis la racine du projet.
+Pour exécuter les tests :
+
+```bash
+# Assurez-vous d'être dans l'environnement virtuel
+source venv/bin/activate
+
+# Lancer les tests
+python -m unittest discover tests
+```
+
+Le fichier `tests/test_scenario.py` contient un scénario complet vérifiant :
+
+1. L'état initial (vide).
+2. La création de catégorie par un admin.
+3. La persistance et la récupération des données.
+4. La sécurité (refus de création pour les non-admins).
 
 
