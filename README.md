@@ -1,117 +1,117 @@
 # API Abilan Tidiane - IMT Second-Hand Marketplace
 
-Ce projet est une application web de type "marketplace" de seconde main, développée avec Flask. Elle fournit une API REST pour la gestion des utilisateurs, des catégories, des annonces et des transactions, ainsi qu'une interface utilisateur basique rendue avec des templates Jinja2.
+This project is a second-hand marketplace web application developed with Flask. It provides a REST API for managing users, categories, listings, and transactions, as well as a basic user interface rendered with Jinja2 templates.
 
-## Stack Technique
+## Tech Stack
 
-- **Langage** : Python 3.8+
-- **Framework Web** : Flask
-- **ORM** : SQLAlchemy
-- **Base de données** : SQLite
-- **API Spec** : OpenAPI 3.1 (`full_openapi.yaml`)
+- **Language**: Python 3.8+
+- **Web Framework**: Flask
+- **ORM**: SQLAlchemy
+- **Database**: SQLite
+- **API Spec**: OpenAPI 3.1 (`full_openapi.yaml`)
 
-## Structure du Projet
+## Project Structure
 
 ```text
-app.py                    # Point d'entrée de l'application Flask
-full_openapi.yaml         # Spécification OpenAPI
-requirements.txt          # Dépendances Python
-start.sh                  # Script de démarrage rapide
-tests/                    # Dossier des tests
-  test_scenario.py        # Scénarios de test reproductibles
+app.py                    # Flask application entry point
+full_openapi.yaml         # OpenAPI specification
+requirements.txt          # Python dependencies
+start.sh                  # Quick start script
+tests/                    # Tests folder
+  test_scenario.py        # Reproducible test scenarios
 database/
-  database.py             # Initialisation DB
-  models.py               # Modèles de données
-  database.db             # Fichier SQLite (généré)
+  database.py             # DB initialization
+  models.py               # Data models
+  database.db             # SQLite file (generated)
 src/
-  templates/              # Templates Jinja2
+  templates/              # Jinja2 templates
 instance/
-  uploads/                # Stockage des fichiers uploadés
+  uploads/                # Uploaded files storage
 ```
 
-## Installation et Démarrage
+## Installation and Startup
 
-### Option 1 : Démarrage Rapide (macOS/Linux)
+### Option 1: Quick Start (macOS/Linux)
 
-Un script `start.sh` est fourni pour automatiser la création de l'environnement virtuel, l'installation des dépendances et le lancement de l'application.
+A `start.sh` script is provided to automate virtual environment creation, dependency installation, and application launch.
 
 ```bash
 chmod +x start.sh
 ./start.sh
 ```
 
-### Option 2 : Installation Manuelle
+### Option 2: Manual Installation
 
-1. **Créer un environnement virtuel** :
+1. **Create a virtual environment**:
 
     ```bash
     python3 -m venv venv
     source venv/bin/activate  # macOS/Linux
-    # ou
+    # or
     venv\Scripts\activate     # Windows
     ```
 
-2. **Installer les dépendances** :
+2. **Install dependencies**:
 
     ```bash
     pip install -r requirements.txt
     ```
 
-3. **Lancer l'application** :
+3. **Run the application**:
 
     ```bash
     python app.py
     ```
 
-L'application sera accessible à l'adresse : `http://127.0.0.1:5000`.
+The application will be accessible at: `http://127.0.0.1:5000`.
 
-## Utilisation de l'API
+## API Usage
 
-L'API suit la spécification définie dans `full_openapi.yaml`.
+The API follows the specification defined in `full_openapi.yaml`.
 
-### Authentification
+### Authentication
 
-L'authentification pour les tests et l'API se fait via le header HTTP `X-User-Email`.
+Authentication for tests and the API is done via the `X-User-Email` HTTP header.
 
-- **Admin** : `admin@imt.test` (pour les opérations privilégiées comme la création de catégories)
-- **Utilisateur Standard** : Tout email enregistré via `POST /api/users`.
+- **Admin**: `admin@imt.test` (for privileged operations like creating categories)
+- **Standard User**: Any email registered via `POST /api/users`.
 
-### Exemples (cURL)
+### Examples (cURL)
 
-**Créer une catégorie (Admin uniquement)** :
+**Create a category (Admin only)**:
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/categories \
   -H 'Content-Type: application/json' \
   -H 'X-User-Email: admin@imt.test' \
-  -d '{"name":"Informatique"}'
+  -d '{"name":"Computing"}'
 ```
 
-**Lister les catégories** :
+**List categories**:
 
 ```bash
 curl -X GET http://127.0.0.1:5000/api/categories
 ```
 
-## Tests Reproductibles
+## Reproducible Tests
 
-Des scénarios de test automatisés sont disponibles dans le dossier `tests/`. Ces tests utilisent une base de données en mémoire pour ne pas affecter vos données locales.
+Automated test scenarios are available in the `tests/` folder. These tests use an in-memory database to avoid affecting your local data.
 
-Pour exécuter les tests :
+To run the tests:
 
 ```bash
-# Assurez-vous d'être dans l'environnement virtuel
+# Ensure you are in the virtual environment
 source venv/bin/activate
 
-# Lancer les tests
+# Run tests
 python -m unittest discover tests
 ```
 
-Le fichier `tests/test_scenario.py` contient un scénario complet vérifiant :
+The `tests/test_scenario.py` file contains a complete scenario verifying:
 
-1. L'état initial (vide).
-2. La création de catégorie par un admin.
-3. La persistance et la récupération des données.
-4. La sécurité (refus de création pour les non-admins).
+1. Initial state (empty).
+2. Category creation by an admin.
+3. Data persistence and retrieval.
+4. Security (creation refusal for non-admins).
 
 
